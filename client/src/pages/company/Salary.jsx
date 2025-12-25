@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -36,89 +39,58 @@ import {
 const Salary = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeTab, setActiveTab] = useState('payroll')
-  
-  const salaryData = [
-    {
-      id: 1,
-      employee: 'Raju Ahmed',
-      employeeId: 'EMP-001',
-      role: 'Carpenter',
-      baseSalary: '৳25,000',
-      overtime: '৳5,250',
-      bonus: '৳2,000',
-      deductions: '৳1,500',
-      netSalary: '৳30,750',
-      month: 'January 2024',
-      status: 'Paid',
-      paymentDate: '2024-01-31',
-      paymentMethod: 'Bank Transfer',
-    },
-    {
-      id: 2,
-      employee: 'Kamal Hossain',
-      employeeId: 'EMP-002',
-      role: 'Welder',
-      baseSalary: '৳22,000',
-      overtime: '৳3,850',
-      bonus: '৳1,500',
-      deductions: '৳1,200',
-      netSalary: '৳26,150',
-      month: 'January 2024',
-      status: 'Paid',
-      paymentDate: '2024-01-31',
-      paymentMethod: 'Cash',
-    },
-    {
-      id: 3,
-      employee: 'Sharmin Akter',
-      employeeId: 'EMP-003',
-      role: 'Sales Executive',
-      baseSalary: '৳18,000',
-      overtime: '৳2,250',
-      bonus: '৳5,000',
-      deductions: '৳800',
-      netSalary: '৳24,450',
-      month: 'January 2024',
-      status: 'Paid',
-      paymentDate: '2024-01-31',
-      paymentMethod: 'Bank Transfer',
-    },
-    {
-      id: 4,
-      employee: 'Abdul Malik',
-      employeeId: 'EMP-004',
-      role: 'Painter',
-      baseSalary: '৳20,000',
-      overtime: '৳4,200',
-      bonus: '৳1,200',
-      deductions: '৳1,000',
-      netSalary: '৳24,400',
-      month: 'January 2024',
-      status: 'Pending',
-      paymentDate: '-',
-      paymentMethod: '-',
-    },
-    {
-      id: 5,
-      employee: 'Fatima Begum',
-      employeeId: 'EMP-005',
-      role: 'Quality Checker',
-      baseSalary: '৳21,000',
-      overtime: '৳3,150',
-      bonus: '৳1,800',
-      deductions: '৳1,300',
-      netSalary: '৳24,650',
-      month: 'January 2024',
-      status: 'Hold',
-      paymentDate: '-',
-      paymentMethod: '-',
-    },
-  ]
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(10)
+  const [salaryMonth, setSalaryMonth] = useState(() => {
+    const d = new Date()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    return `${d.getFullYear()}-${mm}`
+  })
+  const [selectedEmployees, setSelectedEmployees] = useState([])
+  const { currentCompany } = useAuth()
 
-  const filteredSalary = salaryData.filter(item =>
-    item.employee.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.employeeId.toLowerCase().includes(searchTerm.toLowerCase())
+  const toggleEmployee = (id) => {
+    setSelectedEmployees((prev) => {
+      if (!id) return prev
+      return prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    })
+  }
+
+
+  const { data, isLoading, error } = useQuery(
+    { queryKey: ['salaries', currentCompany?.id, page, limit],
+      queryFn: () => api.get('/salary', { params: { companyId: currentCompany?.id, page, limit } }),
+      enabled: !!currentCompany }
   )
+
+  const salaryData = data?.salaries || []
+  const salariesTotal = data?.total ?? salaryData.length
+
+  const { data: workersData } = useQuery({
+    queryKey: ['workers', currentCompany?.id],
+    queryFn: () => api.get('/workers', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+
+  const workers = workersData?.workers || []
+
+  const totalSelectedAmount = useMemo(() => {
+    if (!workers || workers.length === 0) return 0
+    return workers.reduce((sum, w) => {
+      const id = w._id || w.id
+      if (!id) return sum
+      if (!selectedEmployees.includes(id)) return sum
+      const base = Number(w.salary?.baseSalary || w.baseSalary || 0)
+      return sum + base
+    }, 0)
+  }, [workers, selectedEmployees])
+
+  const filteredSalary = (salaryData || []).filter(item => {
+    const name = (item.worker?.user?.name || item.employee || '').toString().toLowerCase()
+    const empId = (item.worker?.employeeId || item.employeeId || '').toString().toLowerCase()
+    const q = searchTerm.toLowerCase()
+    return name.includes(q) || empId.includes(q)
+  })
 
   const getStatusColor = (status) => {
     const colors = {
@@ -128,6 +100,15 @@ const Salary = () => {
     }
     return colors[status] || 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
   }
+
+  // Derived metrics from salaries
+  const monthlyTotal = useMemo(() => (salaryData || []).reduce((s, r) => s + (Number(r.netSalary || 0)), 0), [salaryData])
+  const paidTotal = useMemo(() => (salaryData || []).reduce((s, r) => s + (Number(r.payment?.paidAmount || 0)), 0), [salaryData])
+  const pendingTotal = monthlyTotal - paidTotal
+  const overtimeAmount = useMemo(() => (salaryData || []).reduce((s, r) => s + (Number(r.earnings?.overtime?.amount || 0)), 0), [salaryData])
+  const overtimeHours = useMemo(() => (salaryData || []).reduce((s, r) => s + (Number(r.earnings?.overtime?.hours || 0)), 0), [salaryData])
+  const bonusTotal = useMemo(() => (salaryData || []).reduce((s, r) => s + (Number(r.earnings?.bonus || 0)), 0), [salaryData])
+  const deductionsTotal = useMemo(() => (salaryData || []).reduce((s, r) => s + (Number(r.deductions?.total || 0)), 0), [salaryData])
 
   return (
     <div className="space-y-6">
@@ -157,10 +138,10 @@ const Salary = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳525,000</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(monthlyTotal || 0)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
-              +5% from last month
+              {salaryData.length ? `${salaryData.length} records` : 'No records'}
             </p>
           </CardContent>
         </Card>
@@ -170,9 +151,9 @@ const Salary = () => {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳425,850</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(paidTotal || 0)}</div>
             <p className="text-xs text-muted-foreground">
-              For 20 employees
+              For {salaryData.filter(s => (s.payment?.status === 'paid' || s.payment?.status === 'partial')).length} employees
             </p>
           </CardContent>
         </Card>
@@ -182,9 +163,9 @@ const Salary = () => {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳99,150</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(pendingTotal || 0)}</div>
             <p className="text-xs text-muted-foreground">
-              5 employees pending
+              {salaryData.filter(s => s.payment?.status === 'pending').length} employees pending
             </p>
           </CardContent>
         </Card>
@@ -194,9 +175,9 @@ const Salary = () => {
             <AlertCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳48,900</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(overtimeAmount || 0)}</div>
             <p className="text-xs text-muted-foreground">
-              156 overtime hours
+              {overtimeHours} overtime hours
             </p>
           </CardContent>
         </Card>
@@ -214,7 +195,7 @@ const Salary = () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>January 2024 Payroll</CardTitle>
+                  <CardTitle>{new Date(`${salaryMonth}-01`).toLocaleString(undefined, { month: 'long', year: 'numeric' })} Payroll</CardTitle>
                   <CardDescription>
                     Salary details for all employees
                   </CardDescription>
@@ -236,7 +217,7 @@ const Salary = () => {
               </div>
             </CardHeader>
             <CardContent>
-              <Table>
+                  <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Employee</TableHead>
@@ -252,26 +233,26 @@ const Salary = () => {
                 </TableHeader>
                 <TableBody>
                   {filteredSalary.map((salary) => (
-                    <TableRow key={salary.id}>
+                    <TableRow key={salary._id || salary.id}>
                       <TableCell>
                         <div>
-                          <div className="font-medium">{salary.employee}</div>
+                          <div className="font-medium">{salary.worker?.user?.name || salary.worker?.employeeId || 'Employee'}</div>
                           <div className="text-sm text-muted-foreground">
-                            {salary.employeeId} • {salary.role}
+                            {salary.worker?.employeeId || '-'} • {salary.worker?.designation || '-'}
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium">{salary.baseSalary}</TableCell>
-                      <TableCell className="text-amber-600">{salary.overtime}</TableCell>
-                      <TableCell className="text-green-600">{salary.bonus}</TableCell>
-                      <TableCell className="text-red-600">{salary.deductions}</TableCell>
-                      <TableCell className="font-bold">{salary.netSalary}</TableCell>
+                      <TableCell className="font-medium">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(salary.baseSalary || 0)}</TableCell>
+                      <TableCell className="text-amber-600">{`${salary.earnings?.overtime?.hours || 0}h • ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(salary.earnings?.overtime?.amount || 0)}`}</TableCell>
+                      <TableCell className="text-green-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(salary.earnings?.bonus || 0)}</TableCell>
+                      <TableCell className="text-red-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(salary.deductions?.total || 0)}</TableCell>
+                      <TableCell className="font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(salary.netSalary || 0)}</TableCell>
                       <TableCell>
-                        <Badge className={getStatusColor(salary.status)}>
-                          {salary.status}
+                        <Badge className={getStatusColor((salary.payment?.status || '').toString().toLowerCase() === 'paid' ? 'Paid' : (salary.payment?.status || '').toString())}>
+                          {(salary.payment?.status || 'pending').toString().charAt(0).toUpperCase() + (salary.payment?.status || 'pending').toString().slice(1)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-sm">{salary.paymentDate}</TableCell>
+                      <TableCell className="text-sm">{salary.payment?.paidDate ? new Date(salary.payment.paidDate).toLocaleDateString() : (salary.payment?.paidDate === null ? '-' : '-')}</TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -298,7 +279,7 @@ const Salary = () => {
                               <Mail className="mr-2 h-4 w-4" />
                               Send Slip
                             </DropdownMenuItem>
-                            {salary.status !== 'Paid' && (
+                            {!(salary.payment?.status === 'paid') && (
                               <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem className="text-green-600">
@@ -338,32 +319,31 @@ const Salary = () => {
               <CardContent>
                 <div className="space-y-4">
                   {[
-                    { component: 'Base Salary', amount: '৳460,000', percentage: 88 },
-                    { component: 'Overtime', amount: '৳48,900', percentage: 9 },
-                    { component: 'Bonus', amount: '৳11,500', percentage: 2 },
-                    { component: 'Deductions', amount: '৳5,800', percentage: 1 },
-                  ].map((item) => (
-                    <div key={item.component} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{item.component}</span>
-                        <span className="text-sm text-muted-foreground">{item.amount}</span>
+                    { component: 'Base Salary', amount: (salaryData || []).reduce((s, r) => s + (Number(r.baseSalary || 0)), 0), color: 'bg-blue-500' },
+                    { component: 'Overtime', amount: overtimeAmount, color: 'bg-amber-500' },
+                    { component: 'Bonus', amount: bonusTotal, color: 'bg-green-500' },
+                    { component: 'Deductions', amount: deductionsTotal, color: 'bg-red-500' },
+                  ].map((item) => {
+                    const percent = monthlyTotal > 0 ? Math.round((item.amount / (monthlyTotal || 1)) * 100) : 0
+                    return (
+                      <div key={item.component} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{item.component}</span>
+                          <span className="text-sm text-muted-foreground">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(item.amount || 0)}</span>
+                        </div>
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
+                          <div
+                            className={`h-full rounded-full ${item.color}`}
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
-                        <div
-                          className={`h-full rounded-full ${
-                            item.component === 'Base Salary' ? 'bg-blue-500' :
-                            item.component === 'Overtime' ? 'bg-amber-500' :
-                            item.component === 'Bonus' ? 'bg-green-500' : 'bg-red-500'
-                          }`}
-                          style={{ width: `${item.percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                   <div className="border-t pt-4">
                     <div className="flex items-center justify-between">
                       <span className="font-bold">Net Salary</span>
-                      <span className="text-xl font-bold">৳525,000</span>
+                      <span className="text-xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(monthlyTotal || 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -415,7 +395,7 @@ const Salary = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="salary-month">Select Month</Label>
-                      <Input id="salary-month" type="month" defaultValue="2024-01" />
+                      <Input id="salary-month" type="month" value={salaryMonth} onChange={(e) => setSalaryMonth(e.target.value)} />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="payment-date">Payment Date</Label>
@@ -451,26 +431,25 @@ const Salary = () => {
                     <Label>Select Employees</Label>
                     <div className="rounded-lg border">
                       <div className="max-h-60 overflow-y-auto p-4">
-                        {[
-                          { id: 1, name: 'Raju Ahmed', selected: true },
-                          { id: 2, name: 'Kamal Hossain', selected: true },
-                          { id: 3, name: 'Sharmin Akter', selected: true },
-                          { id: 4, name: 'Abdul Malik', selected: false },
-                          { id: 5, name: 'Fatima Begum', selected: false },
-                        ].map((employee) => (
-                          <div key={employee.id} className="flex items-center justify-between py-2">
-                            <div className="flex items-center gap-3">
-                              <input
-                                type="checkbox"
-                                id={`emp-${employee.id}`}
-                                defaultChecked={employee.selected}
-                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                              />
-                              <Label htmlFor={`emp-${employee.id}`}>{employee.name}</Label>
+                        {workers.map((employee) => {
+                          const id = employee._id || employee.id
+                          const checked = selectedEmployees.includes(id)
+                          return (
+                            <div key={id} className="flex items-center justify-between py-2">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  id={`emp-${id}`}
+                                  checked={checked}
+                                  onChange={() => toggleEmployee(id)}
+                                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                />
+                                <Label htmlFor={`emp-${id}`}>{employee.user?.name || employee.name}</Label>
+                              </div>
+                              <Badge variant="outline">{employee.salary?.baseSalary ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(employee.salary.baseSalary) : '৳0'}</Badge>
                             </div>
-                            <Badge variant="outline">৳25,000</Badge>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   </div>
@@ -479,10 +458,10 @@ const Salary = () => {
                     <div className="flex items-center justify-between">
                       <div>
                         <h4 className="font-semibold">Total Amount</h4>
-                        <p className="text-sm text-muted-foreground">For 3 selected employees</p>
+                        <p className="text-sm text-muted-foreground">For {selectedEmployees.length} selected employees</p>
                       </div>
                       <div className="text-right">
-                        <div className="text-2xl font-bold">৳81,350</div>
+                        <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalSelectedAmount || 0)}</div>
                         <div className="text-sm text-muted-foreground">Net payable amount</div>
                       </div>
                     </div>

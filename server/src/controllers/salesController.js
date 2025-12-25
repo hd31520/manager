@@ -244,6 +244,61 @@ exports.getOrders = async (req, res, next) => {
   }
 }
 
+// @desc    Get sales stats
+// @route   GET /api/sales/stats
+// @access  Private
+exports.getSalesStats = async (req, res, next) => {
+  try {
+    const { companyId } = req.query
+
+    const match = {}
+    if (companyId) match.company = require('mongoose').Types.ObjectId(companyId)
+
+    // Total sales and orders
+    const totals = await Order.aggregate([
+      { $match: match },
+      { $group: { _id: null, totalSales: { $sum: '$total' }, totalOrders: { $sum: 1 }, avgOrder: { $avg: '$total' } } }
+    ])
+
+    // Active customers (distinct customers with orders)
+    const activeCustomersAgg = await Order.aggregate([
+      { $match: match },
+      { $group: { _id: '$customer' } },
+      { $count: 'activeCustomers' }
+    ])
+
+    const totalSales = totals[0]?.totalSales || 0
+    const totalOrders = totals[0]?.totalOrders || 0
+    const avgOrder = totals[0]?.avgOrder || 0
+    const activeCustomers = activeCustomersAgg[0]?.activeCustomers || 0
+
+    // Monthly series (last 6 months)
+    const sixMonthsAgo = new Date()
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
+    sixMonthsAgo.setDate(1)
+    sixMonthsAgo.setHours(0,0,0,0)
+
+    const monthly = await Order.aggregate([
+      { $match: { ...match, createdAt: { $gte: sixMonthsAgo } } },
+      { $group: { _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } }, total: { $sum: '$total' }, orders: { $sum: 1 } } },
+      { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ])
+
+    res.json({
+      success: true,
+      stats: {
+        totalSales,
+        totalOrders,
+        activeCustomers,
+        avgOrder,
+        monthly
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
 // @desc    Get memos
 // @route   GET /api/sales/memos
 // @access  Private

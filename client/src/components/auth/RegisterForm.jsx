@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
@@ -15,12 +15,13 @@ const RegisterForm = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [companyType, setCompanyType] = useState('factory')
-  const { register: registerUser, registerLoading } = useAuth()
+  const { register: registerUser, registerLoading, error } = useAuth()
 
   const {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm({
     defaultValues: {
@@ -33,13 +34,46 @@ const RegisterForm = () => {
       companyType: 'factory',
       factoryCategory: '',
       initialWorkerCount: 1,
+      role: 'owner', // Added role field
     },
   })
 
   const password = watch('password')
 
+  // Update form value when companyType changes
+  useEffect(() => {
+    setValue('companyType', companyType)
+  }, [companyType, setValue])
+
   const onSubmit = (data) => {
-    registerUser(data)
+    // Prepare data for backend API
+    const registrationData = {
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      password: data.password,
+      role: data.role || 'owner', // Ensure role is sent
+      
+      // Optional: Send additional data if your backend supports it
+      // These might need to be saved separately in another API call
+      companyInfo: {
+        companyName: data.companyName,
+        companyType: data.companyType,
+        factoryCategory: data.factoryCategory,
+        initialWorkerCount: data.initialWorkerCount,
+      }
+    }
+
+    // If your backend doesn't accept extra fields, send only required ones:
+    const basicRegistrationData = {
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      password: data.password,
+      role: data.role || 'owner',
+    }
+
+    registerUser(basicRegistrationData) // Send only what backend expects
   }
 
   return (
@@ -52,6 +86,13 @@ const RegisterForm = () => {
           Start managing your business efficiently
         </p>
       </div>
+
+      {/* Display auth errors if any */}
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-400">
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         <div className="grid gap-6 md:grid-cols-2">
@@ -69,11 +110,16 @@ const RegisterForm = () => {
                   id="name"
                   placeholder="John Doe"
                   className="pl-10"
+                  disabled={registerLoading}
                   {...register('name', {
                     required: 'Full name is required',
                     minLength: {
                       value: 3,
                       message: 'Name must be at least 3 characters',
+                    },
+                    maxLength: {
+                      value: 50,
+                      message: 'Name must be less than 50 characters',
                     },
                   })}
                 />
@@ -94,9 +140,13 @@ const RegisterForm = () => {
                   type="email"
                   placeholder="you@example.com"
                   className="pl-10"
+                  disabled={registerLoading}
                   {...register('email', {
                     required: 'Email is required',
-                    validate: (value) => validateEmail(value),
+                    validate: {
+                      emailFormat: (value) => 
+                        validateEmail(value) || 'Please enter a valid email address',
+                    },
                   })}
                 />
               </div>
@@ -116,9 +166,17 @@ const RegisterForm = () => {
                   type="tel"
                   placeholder="01XXXXXXXXX"
                   className="pl-10"
+                  disabled={registerLoading}
                   {...register('phone', {
                     required: 'Phone number is required',
-                    validate: (value) => validatePhone(value),
+                    validate: {
+                      phoneFormat: (value) => 
+                        validatePhone(value) || 'Please enter a valid phone number',
+                    },
+                    pattern: {
+                      value: /^[0-9+-\s()]*$/,
+                      message: 'Please enter a valid phone number',
+                    },
                   })}
                 />
               </div>
@@ -144,8 +202,13 @@ const RegisterForm = () => {
                   id="companyName"
                   placeholder="Your Company Name"
                   className="pl-10"
+                  disabled={registerLoading}
                   {...register('companyName', {
                     required: 'Company name is required',
+                    minLength: {
+                      value: 2,
+                      message: 'Company name must be at least 2 characters',
+                    },
                   })}
                 />
               </div>
@@ -161,7 +224,7 @@ const RegisterForm = () => {
               <Select
                 value={companyType}
                 onValueChange={setCompanyType}
-                {...register('companyType')}
+                disabled={registerLoading}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select business type" />
@@ -174,12 +237,17 @@ const RegisterForm = () => {
                   ))}
                 </SelectContent>
               </Select>
+              {/* Hidden input to store the value in react-hook-form */}
+              <input type="hidden" {...register('companyType')} />
             </div>
 
             {companyType === 'factory' && (
               <div className="space-y-2">
                 <Label htmlFor="factoryCategory">Factory Category *</Label>
-                <Select {...register('factoryCategory', { required: 'Factory category is required' })}>
+                <Select 
+                  disabled={registerLoading}
+                  onValueChange={(value) => setValue('factoryCategory', value)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select factory category" />
                   </SelectTrigger>
@@ -191,6 +259,8 @@ const RegisterForm = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                {/* Hidden input to store the value in react-hook-form */}
+                <input type="hidden" {...register('factoryCategory')} />
                 {errors.factoryCategory && (
                   <p className="text-sm text-red-600 dark:text-red-400">
                     {errors.factoryCategory.message}
@@ -206,10 +276,18 @@ const RegisterForm = () => {
                 type="number"
                 min="1"
                 max="100"
+                disabled={registerLoading}
                 {...register('initialWorkerCount', {
                   required: 'Worker count is required',
-                  min: { value: 1, message: 'Minimum 1 worker required' },
-                  max: { value: 100, message: 'Maximum 100 workers allowed' },
+                  min: { 
+                    value: 1, 
+                    message: 'Minimum 1 worker required' 
+                  },
+                  max: { 
+                    value: 100, 
+                    message: 'Maximum 100 workers allowed' 
+                  },
+                  valueAsNumber: true,
                 })}
               />
               {errors.initialWorkerCount && (
@@ -236,15 +314,24 @@ const RegisterForm = () => {
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   className="pr-10"
+                  disabled={registerLoading}
                   {...register('password', {
                     required: 'Password is required',
-                    validate: (value) => validatePassword(value),
+                    validate: {
+                      passwordStrength: (value) => 
+                        validatePassword(value) || 'Password must be at least 6 characters with one uppercase letter and one number',
+                    },
+                    minLength: {
+                      value: 6,
+                      message: 'Password must be at least 6 characters',
+                    },
                   })}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  disabled={registerLoading}
                 >
                   {showPassword ? (
                     <EyeOff className="h-5 w-5" />
@@ -271,6 +358,7 @@ const RegisterForm = () => {
                   type={showConfirmPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   className="pr-10"
+                  disabled={registerLoading}
                   {...register('confirmPassword', {
                     required: 'Please confirm your password',
                     validate: (value) =>
@@ -281,6 +369,7 @@ const RegisterForm = () => {
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  disabled={registerLoading}
                 >
                   {showConfirmPassword ? (
                     <EyeOff className="h-5 w-5" />
@@ -305,6 +394,7 @@ const RegisterForm = () => {
               id="terms"
               className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600"
               required
+              disabled={registerLoading}
             />
             <Label htmlFor="terms" className="text-sm">
               I agree to the{' '}
@@ -323,6 +413,8 @@ const RegisterForm = () => {
               type="checkbox"
               id="newsletter"
               className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary dark:border-gray-600"
+              disabled={registerLoading}
+              {...register('newsletter')}
             />
             <Label htmlFor="newsletter" className="text-sm">
               I want to receive updates, tips, and special offers via email
@@ -330,18 +422,30 @@ const RegisterForm = () => {
           </div>
         </div>
 
-        <Button type="submit" className="w-full" disabled={registerLoading}>
+        <Button 
+          type="submit" 
+          className="w-full" 
+          disabled={registerLoading}
+        >
           {registerLoading ? (
-            <LoadingSpinner size="sm" className="mr-2" />
-          ) : null}
-          Create Account
+            <>
+              <LoadingSpinner size="sm" className="mr-2" />
+              Creating Account...
+            </>
+          ) : (
+            'Create Account'
+          )}
         </Button>
       </form>
 
       <div className="mt-6 text-center">
         <p className="text-gray-600 dark:text-gray-300">
           Already have an account?{' '}
-          <Link to="/login" className="font-medium text-primary hover:underline">
+          <Link 
+            to="/login" 
+            className="font-medium text-primary hover:underline"
+            onClick={(e) => registerLoading && e.preventDefault()}
+          >
             Sign in
           </Link>
         </p>

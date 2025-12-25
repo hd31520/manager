@@ -26,8 +26,25 @@ const app = express()
 
 // Middleware
 app.use(helmet())
+// Configure CORS. In development reflect the request origin so the
+// Access-Control-Allow-Origin header matches the requesting frontend.
+// Keep credentials enabled so cookies/auth headers work when needed.
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like server-to-server or curl)
+    if (!origin) return callback(null, true)
+
+    // Allow the explicitly configured frontend URL or any localhost origin
+    const configured = process.env.FRONTEND_URL || 'http://localhost:5173'
+    const isLocalhost = /localhost|127\.0\.0\.1/.test(origin)
+
+    if (origin === configured || isLocalhost) {
+      return callback(null, true)
+    }
+
+    // Reject other origins
+    return callback(new Error('Not allowed by CORS'))
+  },
   credentials: true
 }))
 app.use(compression())
@@ -58,6 +75,21 @@ app.use('/api/subscriptions', subscriptionRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/payments', paymentRoutes)
+// navigation route removed (was added during UI experiment)
+
+// In production serve the client app and provide an SPA fallback for non-API routes
+if (process.env.NODE_ENV === 'production') {
+  const clientBuildPath = path.join(__dirname, '../../client/dist')
+
+  // Serve static assets
+  app.use(express.static(clientBuildPath))
+
+  // Serve index.html for all non-API GET requests so client-side routing works
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next()
+    res.sendFile(path.join(clientBuildPath, 'index.html'))
+  })
+}
 
 // 404 handler (must be before error handler)
 app.use((req, res, next) => {

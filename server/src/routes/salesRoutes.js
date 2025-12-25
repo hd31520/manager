@@ -4,6 +4,7 @@ const {
   createOrder,
   createMemo,
   getOrders,
+  getSalesStats,
   getMemos,
   updateOrderStatus
 } = require('../controllers/salesController')
@@ -14,6 +15,7 @@ router.use(protect)
 router.post('/orders', createOrder)
 router.post('/memos', createMemo)
 router.get('/orders', getOrders)
+router.get('/stats', getSalesStats)
 router.get('/memos', getMemos)
 router.put('/orders/:id/status', updateOrderStatus)
 

@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -18,7 +21,8 @@ import {
   Tag,
   AlertTriangle,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  CheckCircle
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -31,98 +35,34 @@ import {
 
 const Products = () => {
   const [searchTerm, setSearchTerm] = useState('')
-  const [products] = useState([
-    {
-      id: 1,
-      code: 'PROD-001',
-      name: 'Wooden Dining Chair',
-      category: 'Furniture',
-      unit: 'pcs',
-      costPrice: '৳1,200',
-      sellingPrice: '৳2,500',
-      stock: 85,
-      minStock: 50,
-      status: 'in-stock',
-      lastUpdated: '2024-01-15',
-      supplier: 'Timber Suppliers Ltd',
-    },
-    {
-      id: 2,
-      code: 'PROD-002',
-      name: 'Steel Office Table',
-      category: 'Furniture',
-      unit: 'pcs',
-      costPrice: '৳3,500',
-      sellingPrice: '৳6,800',
-      stock: 42,
-      minStock: 40,
-      status: 'in-stock',
-      lastUpdated: '2024-01-14',
-      supplier: 'Metal Works Inc',
-    },
-    {
-      id: 3,
-      code: 'PROD-003',
-      name: 'Leather Sofa Set',
-      category: 'Furniture',
-      unit: 'set',
-      costPrice: '৳18,000',
-      sellingPrice: '৳32,000',
-      stock: 15,
-      minStock: 20,
-      status: 'low-stock',
-      lastUpdated: '2024-01-13',
-      supplier: 'Leather Craft Co',
-    },
-    {
-      id: 4,
-      code: 'PROD-004',
-      name: 'Wooden Bed Frame',
-      category: 'Furniture',
-      unit: 'pcs',
-      costPrice: '৳4,800',
-      sellingPrice: '৳8,500',
-      stock: 28,
-      minStock: 30,
-      status: 'low-stock',
-      lastUpdated: '2024-01-12',
-      supplier: 'Timber Suppliers Ltd',
-    },
-    {
-      id: 5,
-      code: 'PROD-005',
-      name: 'Metal Wardrobe',
-      category: 'Furniture',
-      unit: 'pcs',
-      costPrice: '৳6,200',
-      sellingPrice: '৳11,500',
-      stock: 60,
-      minStock: 25,
-      status: 'in-stock',
-      lastUpdated: '2024-01-11',
-      supplier: 'Metal Works Inc',
-    },
-    {
-      id: 6,
-      code: 'PROD-006',
-      name: 'Coffee Table',
-      category: 'Furniture',
-      unit: 'pcs',
-      costPrice: '৳2,100',
-      sellingPrice: '৳4,200',
-      stock: 0,
-      minStock: 15,
-      status: 'out-of-stock',
-      lastUpdated: '2024-01-10',
-      supplier: 'Timber Suppliers Ltd',
-    },
-  ])
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(10)
+  const { currentCompany } = useAuth()
 
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.category.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['products', currentCompany?.id, page, limit, searchTerm],
+    queryFn: () => api.get('/products', { params: { companyId: currentCompany?.id, page, limit, search: searchTerm } }),
+    enabled: !!currentCompany,
+  })
+
+  const products = data?.products || []
+  const total = data?.total ?? products.length
+  const totalPages = Math.max(1, Math.ceil((total) / limit))
+
+  // Fetch aggregated total stock value for the company
+  const { data: stockValueData } = useQuery({
+    queryKey: ['products-stock-value', currentCompany?.id],
+    queryFn: () => api.get('/products/stock-value', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+
+  const totalStockValue = stockValueData?.totalValue ?? 0
+  const formatCurrency = (value) => {
+    // format as BDT with short millions/k
+    if (value >= 1_000_000) return `৳${(value / 1_000_000).toFixed(1)}M`
+    if (value >= 1_000) return `৳${(value / 1_000).toFixed(1)}k`
+    return `৳${value.toFixed(2)}`
+  }
 
   const getStatusColor = (status) => {
     const colors = {
@@ -167,7 +107,7 @@ const Products = () => {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{products.length}</div>
+            <div className="text-2xl font-bold">{data?.total ?? products.length}</div>
             <p className="text-xs text-muted-foreground">
               Across all categories
             </p>
@@ -179,7 +119,7 @@ const Products = () => {
             <Tag className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳1.2M</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalStockValue)}</div>
             <p className="text-xs text-muted-foreground">
               <TrendingUp className="inline h-3 w-3 text-green-600" /> +12%
             </p>
@@ -255,8 +195,8 @@ const Products = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProducts.map((product) => (
-                <TableRow key={product.id}>
+              {products.map((product) => (
+                <TableRow key={product._id || product.id}>
                   <TableCell>
                     <div className="font-medium">{product.code}</div>
                     <div className="text-sm text-muted-foreground">
@@ -357,7 +297,7 @@ const Products = () => {
             </TableBody>
           </Table>
 
-          {filteredProducts.length === 0 && (
+          {products.length === 0 && !isLoading && (
             <div className="py-12 text-center">
               <Package className="mx-auto h-12 w-12 text-muted-foreground" />
               <h3 className="mt-4 text-lg font-semibold">No products found</h3>
@@ -366,22 +306,26 @@ const Products = () => {
               </p>
             </div>
           )}
-
           <div className="mt-6 flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
-              Showing {filteredProducts.length} of {products.length} products
+              Showing {products.length} of {total} products
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+              >
                 Previous
               </Button>
-              <Button variant="outline" size="sm">
-                1
-              </Button>
-              <Button variant="outline" size="sm">
-                2
-              </Button>
-              <Button variant="outline" size="sm">
+              <div className="text-sm px-3">{page} / {totalPages}</div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              >
                 Next
               </Button>
             </div>

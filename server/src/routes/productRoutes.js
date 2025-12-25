@@ -3,6 +3,7 @@ const router = express.Router()
 const {
   createProduct,
   getProducts,
+  getProductsStockValue,
   getProduct,
   updateProduct,
   deleteProduct,
@@ -14,6 +15,7 @@ router.use(protect)
 
 router.post('/', createProduct)
 router.get('/', getProducts)
+router.get('/stock-value', getProductsStockValue)
 router.get('/:id', getProduct)
 router.put('/:id', updateProduct)
 router.delete('/:id', deleteProduct)

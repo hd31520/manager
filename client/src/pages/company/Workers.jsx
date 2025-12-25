@@ -1,5 +1,9 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
+import { cn } from '../../lib/utils'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
@@ -32,93 +36,44 @@ import {
 
 const Workers = () => {
     const [searchTerm, setSearchTerm] = useState('')
-    const [workers] = useState([
-        {
-            id: 1,
-            name: 'Raju Ahmed',
-            employeeId: 'EMP-001',
-            role: 'Carpenter',
-            type: 'Permanent',
-            department: 'Production',
-            salary: '৳25,000',
-            phone: '+8801712345678',
-            email: 'raju@example.com',
-            joinDate: '2023-01-15',
-            status: 'active',
-            avatar: '',
-            attendance: '95%',
-            skillLevel: 'Senior',
-        },
-        {
-            id: 2,
-            name: 'Kamal Hossain',
-            employeeId: 'EMP-002',
-            role: 'Welder',
-            type: 'Permanent',
-            department: 'Metal Works',
-            salary: '৳22,000',
-            phone: '+8801712345679',
-            email: 'kamal@example.com',
-            joinDate: '2023-02-20',
-            status: 'active',
-            avatar: '',
-            attendance: '92%',
-            skillLevel: 'Senior',
-        },
-        {
-            id: 3,
-            name: 'Sharmin Akter',
-            employeeId: 'EMP-003',
-            role: 'Sales Executive',
-            type: 'Permanent',
-            department: 'Sales',
-            salary: '৳18,000',
-            phone: '+8801712345680',
-            email: 'sharmin@example.com',
-            joinDate: '2023-03-10',
-            status: 'active',
-            avatar: '',
-            attendance: '98%',
-            skillLevel: 'Junior',
-        },
-        {
-            id: 4,
-            name: 'Abdul Malik',
-            employeeId: 'EMP-004',
-            role: 'Painter',
-            type: 'Contract',
-            department: 'Finishing',
-            salary: '৳20,000',
-            phone: '+8801712345681',
-            email: 'malik@example.com',
-            joinDate: '2023-04-05',
-            status: 'active',
-            avatar: '',
-            attendance: '90%',
-            skillLevel: 'Junior',
-        },
-        {
-            id: 5,
-            name: 'Fatima Begum',
-            employeeId: 'EMP-005',
-            role: 'Quality Checker',
-            type: 'Permanent',
-            department: 'QC',
-            salary: '৳21,000',
-            phone: '+8801712345682',
-            email: 'fatima@example.com',
-            joinDate: '2023-05-12',
-            status: 'inactive',
-            avatar: '',
-            attendance: '85%',
-            skillLevel: 'Expert',
-        },
-    ])
+    const { currentCompany } = useAuth()
+    const [page, setPage] = useState(1)
+    const [limit, setLimit] = useState(10)
+
+    // Fetch workers from API. If currentCompany is available, pass companyId
+        const { data, isLoading, error } = useQuery({
+            queryKey: ['workers', currentCompany?.id, page, limit],
+            queryFn: () => api.get('/workers', { params: { companyId: currentCompany?.id, page, limit } }).then(res => res.data),
+            enabled: !!currentCompany,
+        })
+
+        const workers = data?.workers || []
+        const total = data?.total ?? workers.length
+        const totalPages = Math.max(1, Math.ceil((total || 0) / (limit || 1)))
+
+        const { data: attendanceToday, isLoading: attendanceLoading } = useQuery({
+            queryKey: ['attendanceToday', currentCompany?.id],
+            queryFn: () => api.get('/workers/attendance/today', { params: { companyId: currentCompany?.id } }).then(res => res.data),
+            enabled: !!currentCompany,
+        })
+
+        const { data: salariesData, isLoading: salariesLoading } = useQuery({
+            queryKey: ['salarySummary', currentCompany?.id],
+            queryFn: () => {
+                const now = new Date()
+                const month = now.getMonth() + 1
+                const year = now.getFullYear()
+                return api.get('/salary', { params: { companyId: currentCompany?.id, month, year, limit: 100 } }).then(res => res.data)
+            },
+            enabled: !!currentCompany,
+        })
+
+        const monthlySalary = (salariesData?.salaries || []).reduce((s, r) => s + (r.netSalary || 0), 0)
 
     const filteredWorkers = workers.filter(worker =>
-        worker.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        worker.employeeId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        worker.role.toLowerCase().includes(searchTerm.toLowerCase())
+        (worker.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (worker.employeeId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (worker.role || '').toLowerCase().includes(searchTerm.toLowerCase())
     )
 
     const getStatusColor = (status) => {
@@ -164,12 +119,12 @@ const Workers = () => {
                         <CardTitle className="text-sm font-medium">Total Workers</CardTitle>
                         <Users className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">25</div>
-                        <p className="text-xs text-muted-foreground">
-                            +2 from last month
-                        </p>
-                    </CardContent>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{data?.total ?? workers.length}</div>
+                            <p className="text-xs text-muted-foreground">
+                                {data?.total ? `${data.total - (data.prevTotal || 0)} from last month` : '—'}
+                            </p>
+                        </CardContent>
                 </Card>
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -177,9 +132,9 @@ const Workers = () => {
                         <Calendar className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">22</div>
+                        <div className="text-2xl font-bold">{attendanceToday?.present ?? 0}</div>
                         <p className="text-xs text-muted-foreground">
-                            88% attendance rate
+                            {attendanceToday ? `${attendanceToday.percentage}% attendance rate` : '—'}
                         </p>
                     </CardContent>
                 </Card>
@@ -189,9 +144,9 @@ const Workers = () => {
                         <DollarSign className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">৳525,000</div>
+                        <div className="text-2xl font-bold">৳{monthlySalary.toLocaleString()}</div>
                         <p className="text-xs text-muted-foreground">
-                            +5% from last month
+                            {salariesData?.total ? `${salariesData.count} salaries this month` : '—'}
                         </p>
                     </CardContent>
                 </Card>
@@ -201,9 +156,9 @@ const Workers = () => {
                         <Calendar className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">156</div>
+                        <div className="text-2xl font-bold">{/* fallback until overtime endpoint added */}0</div>
                         <p className="text-xs text-muted-foreground">
-                            +12% from last month
+                            Overtime hours this month
                         </p>
                     </CardContent>
                 </Card>
@@ -253,13 +208,13 @@ const Workers = () => {
                                     <TableCell>
                                         <div className="flex items-center gap-3">
                                             <Avatar>
-                                                <AvatarImage src={worker.avatar} />
+                                                <AvatarImage src={worker.avatar} alt={worker.name || 'Worker'} />
                                                 <AvatarFallback>
-                                                    {worker.name.split(' ').map(n => n[0]).join('')}
+                                                    {(worker.name || '').split(' ').map(n => n[0]).join('') || 'W'}
                                                 </AvatarFallback>
                                             </Avatar>
                                             <div>
-                                                <div className="font-medium">{worker.name}</div>
+                                                <div className="font-medium">{worker.name || 'Unnamed Worker'}</div>
                                                 <div className="text-sm text-muted-foreground">
                                                     Joined {worker.joinDate}
                                                 </div>
@@ -361,19 +316,31 @@ const Workers = () => {
 
                     <div className="mt-6 flex items-center justify-between">
                         <div className="text-sm text-muted-foreground">
-                            Showing {filteredWorkers.length} of {workers.length} workers
+                            Showing {filteredWorkers.length} of {total} workers
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" disabled>
+                            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
                                 Previous
                             </Button>
-                            <Button variant="outline" size="sm">
-                                1
-                            </Button>
-                            <Button variant="outline" size="sm">
-                                2
-                            </Button>
-                            <Button variant="outline" size="sm">
+                            {(() => {
+                                const pages = []
+                                const start = Math.max(1, page - 2)
+                                const end = Math.min(totalPages, start + 4)
+                                for (let i = start; i <= end; i++) {
+                                    pages.push(i)
+                                }
+                                return pages.map(pn => (
+                                    <Button
+                                        key={pn}
+                                        variant={pn === page ? 'default' : 'outline'}
+                                        size="sm"
+                                        onClick={() => setPage(pn)}
+                                    >
+                                        {pn}
+                                    </Button>
+                                ))
+                            })()}
+                            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
                                 Next
                             </Button>
                         </div>

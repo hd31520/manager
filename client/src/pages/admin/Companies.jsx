@@ -379,11 +379,11 @@ const AdminCompanies = () => {
                       <div className="flex items-center gap-3">
                         <Avatar>
                           <AvatarFallback>
-                            {company.name.split(' ').map(n => n[0]).join('')}
+                            {(company.name || '').split(' ').map(n => n[0]).join('') || 'C'}
                           </AvatarFallback>
                         </Avatar>
                         <div>
-                          <div className="font-medium">{company.name}</div>
+                          <div className="font-medium">{company.name || 'Unnamed Company'}</div>
                           <div className="text-sm text-muted-foreground">
                             ID: COMP-{company.id.toString().padStart(3, '0')}
                           </div>

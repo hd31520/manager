@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -38,41 +41,139 @@ import {
 
 const Reports = () => {
   const [activeTab, setActiveTab] = useState('sales')
-  
-  const salesData = [
-    { month: 'Jan', sales: 400000, target: 350000 },
-    { month: 'Feb', sales: 300000, target: 350000 },
-    { month: 'Mar', sales: 500000, target: 400000 },
-    { month: 'Apr', sales: 450000, target: 400000 },
-    { month: 'May', sales: 600000, target: 450000 },
-    { month: 'Jun', sales: 550000, target: 500000 },
-  ]
+  const { currentCompany } = useAuth()
+  const queryClient = useQueryClient()
 
-  const expenseData = [
-    { name: 'Salary', value: 400000, color: '#3B82F6' },
-    { name: 'Raw Materials', value: 300000, color: '#10B981' },
-    { name: 'Rent & Utilities', value: 150000, color: '#F59E0B' },
-    { name: 'Marketing', value: 50000, color: '#8B5CF6' },
-    { name: 'Others', value: 75000, color: '#EC4899' },
-  ]
+  const [reportType, setReportType] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [format, setFormat] = useState('pdf')
+  // Dynamic analytics queries
+  const { data: salesStatsRes } = useQuery({
+    queryKey: ['sales-stats', currentCompany?.id],
+    queryFn: () => api.get('/sales/stats', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
 
-  const productPerformance = [
-    { product: 'Wooden Chair', sales: 425000, units: 170, growth: '+12%' },
-    { product: 'Office Table', sales: 285600, units: 42, growth: '+8%' },
-    { product: 'Sofa Set', sales: 480000, units: 15, growth: '+25%' },
-    { product: 'Bed Frame', sales: 238000, units: 28, growth: '+5%' },
-    { product: 'Wardrobe', sales: 345000, units: 30, growth: '+18%' },
-  ]
+  const salesStats = salesStatsRes?.stats || { totalSales: 0, totalOrders: 0, activeCustomers: 0, avgOrder: 0, monthly: [] }
 
-  const recentReports = [
-    { id: 1, name: 'Monthly Sales Report', type: 'Sales', date: '2024-01-15', size: '2.4 MB' },
-    { id: 2, name: 'Salary Report - Jan 2024', type: 'Salary', date: '2024-01-31', size: '1.8 MB' },
-    { id: 3, name: 'Inventory Status', type: 'Inventory', date: '2024-01-30', size: '3.2 MB' },
-    { id: 4, name: 'Customer Analysis', type: 'Customer', date: '2024-01-28', size: '2.1 MB' },
-    { id: 5, name: 'Profit & Loss Statement', type: 'Financial', date: '2024-01-25', size: '4.5 MB' },
-  ]
-
+  const salesData = (salesStats.monthly || []).map(m => ({ month: `${m._id.month}/${m._id.year}`, sales: m.total || 0, target: 0 }))
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
+
+  // Expenses by category
+  const { data: expensesRes } = useQuery({
+    queryKey: ['expenses', currentCompany?.id],
+    queryFn: () => api.get('/payments/transactions', { params: { companyId: currentCompany?.id, type: 'expense', limit: 100 } }),
+    enabled: !!currentCompany,
+  })
+
+  const expenseTransactions = expensesRes?.transactions || []
+  const expenseMap = {}
+  for (const t of expenseTransactions) {
+    const cat = t.category || 'Other'
+    expenseMap[cat] = (expenseMap[cat] || 0) + (Number(t.amount || 0))
+  }
+  const expenseData = Object.keys(expenseMap).map((k, i) => ({ name: k, value: expenseMap[k], color: COLORS[i % COLORS.length] }))
+
+  const totalExpenses = Object.values(expenseMap).reduce((s, v) => s + v, 0)
+  const totalRevenue = salesStats.totalSales || 0
+  const profit = totalRevenue - totalExpenses
+  const activeCustomers = salesStats.activeCustomers || 0
+
+  // Inventory analytics: stock value and alerts
+  const { data: stockValueRes } = useQuery({
+    queryKey: ['products-stock-value', currentCompany?.id],
+    queryFn: () => api.get('/products/stock-value', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+  const totalStockValue = stockValueRes?.totalValue || 0
+
+  const { data: alertsRes } = useQuery({
+    queryKey: ['inventory-alerts', currentCompany?.id],
+    queryFn: () => api.get('/inventory/alerts', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+  const lowStockProducts = alertsRes?.alerts?.products?.lowStock || []
+  const outOfStockProducts = alertsRes?.alerts?.products?.outOfStock || []
+
+  // Customers for segmentation/top customers
+  const { data: customersRes } = useQuery({
+    queryKey: ['customers', currentCompany?.id, 'top'],
+    queryFn: () => api.get('/customers', { params: { companyId: currentCompany?.id, limit: 100 } }),
+    enabled: !!currentCompany,
+  })
+  const customers = customersRes?.customers || []
+  const customerSegmentsMap = {}
+  for (const c of customers) {
+    const seg = (c.customerType || 'retail')
+    customerSegmentsMap[seg] = (customerSegmentsMap[seg] || { count: 0, revenue: 0 })
+    customerSegmentsMap[seg].count += 1
+    customerSegmentsMap[seg].revenue += Number(c.totalPurchases || 0)
+  }
+  const customerSegments = Object.keys(customerSegmentsMap).map((k) => ({ segment: k, count: customerSegmentsMap[k].count, revenue: customerSegmentsMap[k].revenue }))
+  const topCustomers = (customers || []).slice().sort((a,b) => (Number(b.totalPurchases || 0) - Number(a.totalPurchases || 0))).slice(0,5)
+
+  // Fetch generated reports from the API (server returns { success, count, total, reports })
+  const { data: reportsData, isLoading: reportsLoading, isError: reportsError } = useQuery({
+    queryKey: ['reports', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/reports', { params: { companyId: currentCompany?.id } })
+      // api wrapper in this project sometimes returns response or response.data — normalize both
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const recentReports = reportsData?.reports || []
+
+  // Fetch product performance data
+  const { data: productsRes } = useQuery({
+    queryKey: ['products', currentCompany?.id],
+    queryFn: () => api.get('/products', { params: { companyId: currentCompany?.id, limit: 50 } }),
+    enabled: !!currentCompany,
+  })
+
+  // Calculate product performance from products data
+  const productPerformance = (productsRes?.products || []).slice(0, 5).map(product => ({
+    product: product.name || 'Unnamed Product',
+    sales: Number(product.totalSales || product.salesValue || 0),
+    units: Number(product.totalSold || product.quantitySold || 0),
+    growth: product.growth || '+0%'
+  }))
+
+  const generateReportMutation = useMutation({
+    mutationFn: async (body) => {
+      const res = await api.post('/reports/generate', body)
+      return res.data ? res.data : res
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['reports', currentCompany?.id])
+    }
+  })
+
+  const handleQuickGenerate = () => {
+    if (!currentCompany) return
+    const now = new Date()
+    const body = {
+      companyId: currentCompany.id,
+      type: 'monthly_sales',
+      period: { month: now.getMonth() + 1, year: now.getFullYear() },
+      format: 'pdf'
+    }
+    generateReportMutation.mutate(body)
+  }
+
+  const handleGenerateFromForm = () => {
+    if (!currentCompany) return
+    const period = startDate || endDate ? { startDate: startDate || null, endDate: endDate || null } : {}
+    const body = {
+      companyId: currentCompany.id,
+      type: reportType || 'monthly_sales',
+      period,
+      format
+    }
+    generateReportMutation.mutate(body)
+  }
 
   return (
     <div className="space-y-6">
@@ -88,9 +189,9 @@ const Reports = () => {
             <Calendar className="mr-2 h-4 w-4" />
             Last 30 Days
           </Button>
-          <Button>
+          <Button onClick={handleQuickGenerate} disabled={generateReportMutation.isLoading}>
             <FileText className="mr-2 h-4 w-4" />
-            Generate Report
+            {generateReportMutation.isLoading ? 'Generating...' : 'Generate Report'}
           </Button>
         </div>
       </div>
@@ -102,10 +203,10 @@ const Reports = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳2.8M</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalRevenue || 0)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
-              +15.5% from last quarter
+              {salesData.length ? `${salesData.length} months` : ''}
             </p>
           </CardContent>
         </Card>
@@ -115,10 +216,10 @@ const Reports = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳1.05M</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalExpenses || 0)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingDown className="mr-1 h-3 w-3 text-red-600" />
-              -3.2% from last quarter
+              {expenseData.length ? `${expenseData.length} categories` : ''}
             </p>
           </CardContent>
         </Card>
@@ -128,9 +229,9 @@ const Reports = () => {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳1.75M</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(profit || 0)}</div>
             <p className="text-xs text-muted-foreground">
-              62.5% profit margin
+              {totalRevenue > 0 ? `${((profit / totalRevenue) * 100).toFixed(1)}% profit margin` : ''}
             </p>
           </CardContent>
         </Card>
@@ -140,10 +241,10 @@ const Reports = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">85</div>
+            <div className="text-2xl font-bold">{activeCustomers}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
-              +8 from last quarter
+              {activeCustomers ? `${activeCustomers} active` : ''}
             </p>
           </CardContent>
         </Card>
@@ -203,8 +304,8 @@ const Reports = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {productPerformance.map((product) => (
-                      <TableRow key={product.product}>
+                    {productPerformance.map((product, index) => (
+                      <TableRow key={index}>
                         <TableCell className="font-medium">{product.product}</TableCell>
                         <TableCell>৳{product.sales.toLocaleString()}</TableCell>
                         <TableCell>{product.units}</TableCell>
@@ -273,41 +374,41 @@ const Reports = () => {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span>Total Revenue</span>
-                      <span className="font-medium text-green-600">৳2,800,000</span>
+                      <span className="font-medium text-green-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalRevenue)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Cost of Goods Sold</span>
-                      <span className="font-medium text-red-600">৳1,200,000</span>
+                      <span className="font-medium text-red-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalExpenses)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Gross Profit</span>
-                      <span className="font-medium">৳1,600,000</span>
+                      <span className="font-medium">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(profit)}</span>
                     </div>
                   </div>
                   
                   <div className="border-t pt-4 space-y-2">
                     <div className="flex justify-between">
                       <span>Operating Expenses</span>
-                      <span className="font-medium text-red-600">৳450,000</span>
+                      <span className="font-medium text-red-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalExpenses * 0.3)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Salary Expenses</span>
-                      <span className="font-medium text-red-600">৳400,000</span>
+                      <span className="font-medium text-red-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalExpenses * 0.4)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Other Expenses</span>
-                      <span className="font-medium text-red-600">৳200,000</span>
+                      <span className="font-medium text-red-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalExpenses * 0.3)}</span>
                     </div>
                   </div>
                   
                   <div className="border-t pt-4">
                     <div className="flex justify-between font-bold">
                       <span>Net Profit</span>
-                      <span className="text-xl text-green-600">৳1,750,000</span>
+                      <span className="text-xl text-green-600">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(profit)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-muted-foreground">
                       <span>Profit Margin</span>
-                      <span>62.5%</span>
+                      <span>{totalRevenue > 0 ? `${((profit / totalRevenue) * 100).toFixed(1)}%` : '0%'}</span>
                     </div>
                   </div>
                 </div>
@@ -393,24 +494,23 @@ const Reports = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {[
-                      { product: 'Leather Sofa Set', stock: 15, min: 20 },
-                      { product: 'Wooden Bed Frame', stock: 28, min: 30 },
-                      { product: 'Coffee Table', stock: 8, min: 15 },
-                      { product: 'Dining Chair', stock: 25, min: 50 },
-                    ].map((item) => (
-                      <div key={item.product} className="rounded-lg border p-3">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-medium">{item.product}</div>
-                            <div className="text-sm text-muted-foreground">
-                              Stock: {item.stock} | Min: {item.min}
+                    {lowStockProducts.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No low stock products</div>
+                    ) : (
+                      lowStockProducts.map((p) => (
+                        <div key={p._id || p.id} className="rounded-lg border p-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-medium">{p.name}</div>
+                              <div className="text-sm text-muted-foreground">
+                                Stock: {p.inventory?.quantity ?? 0} | Min: {p.inventory?.minStock ?? 0}
+                              </div>
                             </div>
+                            <Badge variant="destructive">Low Stock</Badge>
                           </div>
-                          <Badge variant="destructive">Low Stock</Badge>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -431,11 +531,7 @@ const Reports = () => {
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={[
-                        { segment: 'Corporate', count: 15, revenue: 1750000 },
-                        { segment: 'Wholesale', count: 25, revenue: 850000 },
-                        { segment: 'Retail', count: 45, revenue: 200000 },
-                      ]}
+                      data={customerSegments.map(s => ({ segment: (s.segment || '').toString().charAt(0).toUpperCase() + (s.segment || '').toString().slice(1), count: s.count, revenue: s.revenue }))}
                     >
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="segment" />
@@ -493,25 +589,20 @@ const Reports = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {[
-                      { customer: 'DEF Enterprises', spent: '৳2,100,000', orders: 42 },
-                      { customer: 'ABC Corporation', spent: '৳1,250,000', orders: 35 },
-                      { customer: 'GHI Traders', spent: '৳950,000', orders: 28 },
-                      { customer: 'XYZ Retail', spent: '৳850,000', orders: 25 },
-                    ].map((customer, index) => (
-                      <div key={customer.customer} className="flex items-center justify-between">
+                    {topCustomers.map((customer, index) => (
+                      <div key={customer._id || customer.id} className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
                             <span className="text-sm font-bold">{index + 1}</span>
                           </div>
                           <div>
-                            <div className="font-medium">{customer.customer}</div>
+                            <div className="font-medium">{customer.name || customer.companyName || customer.customer || 'Customer'}</div>
                             <div className="text-sm text-muted-foreground">
-                              {customer.orders} orders
+                              {customer.orders || 0} orders
                             </div>
                           </div>
                         </div>
-                        <div className="font-bold">{customer.spent}</div>
+                        <div className="font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(customer.totalPurchases || 0)}</div>
                       </div>
                     ))}
                   </div>
@@ -540,31 +631,46 @@ const Reports = () => {
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {recentReports.map((report) => (
-                    <TableRow key={report.id}>
-                      <TableCell className="font-medium">{report.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{report.type}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{report.date}</TableCell>
-                      <TableCell className="text-sm">{report.size}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant="outline">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="outline">
-                            <Printer className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="outline">
-                            <Mail className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                  <TableBody>
+                    {reportsLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center">Loading reports...</TableCell>
+                      </TableRow>
+                    ) : (recentReports.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center">No reports found</TableCell>
+                      </TableRow>
+                    ) : (
+                      recentReports.map((report) => (
+                        <TableRow key={report._id || report.id}>
+                          <TableCell className="font-medium">{report.title || report.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{report.type}</Badge>
+                          </TableCell>
+                          <TableCell className="text-sm">{report.createdAt ? new Date(report.createdAt).toLocaleString() : report.date}</TableCell>
+                          <TableCell className="text-sm">{report.fileSize || report.size || '-'}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => report.fileUrl && window.open(report.fileUrl, '_blank')}
+                                disabled={!report.fileUrl}
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" variant="outline" disabled>
+                                <Printer className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" variant="outline" disabled>
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ))}
+                  </TableBody>
               </Table>
             </CardContent>
           </Card>
@@ -583,10 +689,13 @@ const Reports = () => {
                     <Label htmlFor="report-type">Report Type</Label>
                     <select
                       id="report-type"
+                      value={reportType}
+                      onChange={(e) => setReportType(e.target.value)}
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                       <option value="">Select report type</option>
-                      <option value="sales">Sales Report</option>
+                      <option value="daily_sales">Daily Sales Report</option>
+                      <option value="monthly_sales">Monthly Sales Report</option>
                       <option value="inventory">Inventory Report</option>
                       <option value="financial">Financial Report</option>
                       <option value="customer">Customer Report</option>
@@ -597,11 +706,11 @@ const Reports = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="start-date">Start Date</Label>
-                      <Input id="start-date" type="date" />
+                      <Input id="start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="end-date">End Date</Label>
-                      <Input id="end-date" type="date" />
+                      <Input id="end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
                     </div>
                   </div>
 
@@ -609,6 +718,8 @@ const Reports = () => {
                     <Label htmlFor="format">Format</Label>
                     <select
                       id="format"
+                      value={format}
+                      onChange={(e) => setFormat(e.target.value)}
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                       <option value="pdf">PDF</option>
@@ -617,7 +728,9 @@ const Reports = () => {
                     </select>
                   </div>
 
-                  <Button className="w-full">Generate Report</Button>
+                  <Button className="w-full" type="button" onClick={handleGenerateFromForm} disabled={generateReportMutation.isLoading || !currentCompany}>
+                    {generateReportMutation.isLoading ? 'Generating...' : 'Generate Report'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>

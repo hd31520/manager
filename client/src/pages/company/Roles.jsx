@@ -1,5 +1,9 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
+import { formatDate } from '../../lib/utils'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
@@ -38,62 +42,46 @@ import {
 
 const Roles = () => {
   const [searchTerm, setSearchTerm] = useState('')
-  const [roles] = useState([
-    {
-      id: 1,
-      name: 'Company Owner',
-      description: 'Full system access with all permissions',
-      users: 1,
-      permissions: 25,
-      isDefault: true,
-      createdAt: '2023-01-15',
-    },
-    {
-      id: 2,
-      name: 'Manager',
-      description: 'Operational management and supervision',
-      users: 3,
-      permissions: 18,
-      isDefault: true,
-      createdAt: '2023-01-15',
-    },
-    {
-      id: 3,
-      name: 'Supervisor',
-      description: 'Team supervision and task assignment',
-      users: 2,
-      permissions: 12,
-      isDefault: false,
-      createdAt: '2023-02-20',
-    },
-    {
-      id: 4,
-      name: 'Worker',
-      description: 'Basic access for workers',
-      users: 18,
-      permissions: 5,
-      isDefault: true,
-      createdAt: '2023-01-15',
-    },
-    {
-      id: 5,
-      name: 'Sales Executive',
-      description: 'Sales and customer management',
-      users: 2,
-      permissions: 8,
-      isDefault: true,
-      createdAt: '2023-03-10',
-    },
-    {
-      id: 6,
-      name: 'Accountant',
-      description: 'Financial management and reporting',
-      users: 1,
-      permissions: 10,
-      isDefault: false,
-      createdAt: '2023-04-05',
-    },
-  ])
+  const { currentCompany } = useAuth()
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['roles', currentCompany?.id],
+    queryFn: () => api.get('/roles', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+
+  const roles = data?.roles || []
+
+  const { data: usersCountData } = useQuery({
+    queryKey: ['company-users-count', currentCompany?.id],
+    queryFn: () => api.get(`/companies/${currentCompany?.id}/users-count`),
+    enabled: !!currentCompany?.id,
+  })
+
+  const activeUsersCount = usersCountData?.count ?? 0
+
+  const permissionModuleMap = {
+    Company: 'settings',
+    Workers: 'workers',
+    Salary: 'salary',
+    Sales: 'sales',
+    Inventory: 'inventory',
+    Reports: 'reports',
+    Settings: 'settings',
+    Products: 'products',
+    Customers: 'customers'
+  }
+
+  const countPermissions = (permObj) => {
+    if (!permObj) return 0
+    return Object.values(permObj).reduce((sum, v) => {
+      if (v && typeof v === 'object') {
+        // nested object (module) - count truthy fields
+        return sum + Object.values(v).filter(Boolean).length
+      }
+      return sum
+    }, 0)
+  }
 
   const [permissions] = useState([
     { module: 'Company', actions: ['read', 'update'] },
@@ -106,8 +94,8 @@ const Roles = () => {
   ])
 
   const filteredRoles = roles.filter(role =>
-    role.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    role.description.toLowerCase().includes(searchTerm.toLowerCase())
+    (role.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (role.description || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   return (
@@ -201,7 +189,7 @@ const Roles = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">25</div>
+            <div className="text-2xl font-bold">{activeUsersCount}</div>
             <p className="text-xs text-muted-foreground">
               Across all roles
             </p>
@@ -261,7 +249,7 @@ const Roles = () => {
             </TableHeader>
             <TableBody>
               {filteredRoles.map((role) => (
-                <TableRow key={role.id}>
+                <TableRow key={role._id || role.id}>
                   <TableCell>
                     <div className="font-medium">{role.name}</div>
                     {role.isDefault && (
@@ -285,7 +273,7 @@ const Roles = () => {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-600" />
-                      <span className="font-medium">{role.permissions}</span>
+                      <span className="font-medium">{countPermissions(role.permissions)}</span>
                       <span className="text-sm text-muted-foreground">permissions</span>
                     </div>
                   </TableCell>
@@ -296,7 +284,7 @@ const Roles = () => {
                   </TableCell>
                   <TableCell>
                     <div className="text-sm text-muted-foreground">
-                      {role.createdAt}
+                      {role.createdAt ? formatDate(role.createdAt, 'dd MMM yyyy') : '-'}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -358,23 +346,20 @@ const Roles = () => {
                       <td className="px-4 py-3 text-sm font-medium">
                         {permission.module}
                       </td>
-                      {roles.slice(0, 4).map((role) => (
-                        <td key={role.id} className="px-4 py-3 text-center">
-                          {role.name === 'Company Owner' ? (
-                            <CheckCircle className="mx-auto h-5 w-5 text-green-600" />
-                          ) : role.name === 'Worker' ? (
-                            <XCircle className="mx-auto h-5 w-5 text-red-600" />
-                          ) : (
-                            <div className="flex justify-center">
-                              {Math.random() > 0.5 ? (
-                                <CheckCircle className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <XCircle className="h-5 w-5 text-red-600" />
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      ))}
+                          {roles.slice(0, 4).map((role) => {
+                            const key = permissionModuleMap[permission.module] || permission.module.toLowerCase()
+                            const perms = role.permissions?.[key] || {}
+                            const hasAny = Object.values(perms).some(Boolean)
+                            return (
+                              <td key={role._id || role.id} className="px-4 py-3 text-center">
+                                {hasAny ? (
+                                  <CheckCircle className="mx-auto h-5 w-5 text-green-600" />
+                                ) : (
+                                  <XCircle className="mx-auto h-5 w-5 text-red-600" />
+                                )}
+                              </td>
+                            )
+                          })}
                     </tr>
                   ))}
                 </tbody>
@@ -403,7 +388,7 @@ const Roles = () => {
                   <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
                     <div
                       className="h-full rounded-full bg-primary"
-                      style={{ width: `${(role.users / 25) * 100}%` }}
+                      style={{ width: `${(role.users / (activeUsersCount || 1)) * 100}%` }}
                     />
                   </div>
                 </div>

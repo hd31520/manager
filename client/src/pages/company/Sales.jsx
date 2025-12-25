@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -6,39 +9,6 @@ import { Label } from '../../components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
 import { Badge } from '../../components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
-import { 
-  ShoppingCart,
-  Plus,
-  Search,
-  Filter,
-  Download,
-  TrendingUp,
-  DollarSign,
-  Users,
-  Package,
-  MoreVertical,
-  Eye,
-  Edit,
-  Trash2,
-  Printer,
-  Mail
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '../../components/ui/dialog'
 import {
   LineChart,
   Line,
@@ -51,115 +21,81 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
+import { Download, Plus, Eye, Edit, Trash2, MoreVertical, Mail, Printer, ShoppingCart, TrendingUp, DollarSign, Users, Package, Filter, Search } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '../../components/ui/dropdown-menu'
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../components/ui/dialog'
 
 const Sales = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeTab, setActiveTab] = useState('orders')
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(10)
+  const { currentCompany } = useAuth()
 
-  const salesData = [
-    { month: 'Jan', sales: 400000, orders: 24 },
-    { month: 'Feb', sales: 300000, orders: 18 },
-    { month: 'Mar', sales: 500000, orders: 30 },
-    { month: 'Apr', sales: 450000, orders: 27 },
-    { month: 'May', sales: 600000, orders: 36 },
-    { month: 'Jun', sales: 550000, orders: 33 },
-  ]
+  const { data: statsRes } = useQuery({
+    queryKey: ['sales-stats', currentCompany?.id],
+    queryFn: () => api.get('/sales/stats', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
 
-  const orders = [
-    {
-      id: 1,
-      orderNumber: 'ORD-00123',
-      customer: 'ABC Corporation',
-      date: '2024-01-15',
-      items: 5,
-      amount: '৳85,000',
-      payment: 'Paid',
-      status: 'Delivered',
-      type: 'Online',
-    },
-    {
-      id: 2,
-      orderNumber: 'ORD-00124',
-      customer: 'XYZ Retail',
-      date: '2024-01-14',
-      items: 3,
-      amount: '৳42,500',
-      payment: 'Paid',
-      status: 'Processing',
-      type: 'Offline',
-    },
-    {
-      id: 3,
-      orderNumber: 'ORD-00125',
-      customer: 'Individual Customer',
-      date: '2024-01-13',
-      items: 2,
-      amount: '৳32,000',
-      payment: 'Pending',
-      status: 'Pending',
-      type: 'Online',
-    },
-    {
-      id: 4,
-      orderNumber: 'ORD-00126',
-      customer: 'DEF Enterprises',
-      date: '2024-01-12',
-      items: 8,
-      amount: '৳125,000',
-      payment: 'Partial',
-      status: 'Confirmed',
-      type: 'Offline',
-    },
-    {
-      id: 5,
-      orderNumber: 'ORD-00127',
-      customer: 'GHI Traders',
-      date: '2024-01-11',
-      items: 4,
-      amount: '৳68,000',
-      payment: 'Paid',
-      status: 'Shipped',
-      type: 'Online',
-    },
-  ]
+  const stats = statsRes?.stats || { totalSales: 0, totalOrders: 0, activeCustomers: 0, avgOrder: 0, monthly: [] }
 
-  const memos = [
-    {
-      id: 1,
-      memoNumber: 'MEM-00123',
-      customer: 'Walk-in Customer',
-      date: '2024-01-15',
-      amount: '৳25,000',
-      paid: '৳25,000',
-      due: '৳0',
-      status: 'Paid',
-    },
-    {
-      id: 2,
-      memoNumber: 'MEM-00124',
-      customer: 'Regular Customer',
-      date: '2024-01-14',
-      amount: '৳42,500',
-      paid: '৳20,000',
-      due: '৳22,500',
-      status: 'Partial',
-    },
-    {
-      id: 3,
-      memoNumber: 'MEM-00125',
-      customer: 'New Customer',
-      date: '2024-01-13',
-      amount: '৳18,000',
-      paid: '৳0',
-      due: '৳18,000',
-      status: 'Pending',
-    },
-  ]
+  const { data: ordersRes } = useQuery({
+    queryKey: ['orders', currentCompany?.id, page, limit, searchTerm],
+    queryFn: () => api.get('/sales/orders', { params: { companyId: currentCompany?.id, page, limit, search: searchTerm } }),
+    enabled: !!currentCompany,
+  })
 
-  const filteredOrders = orders.filter(order =>
-    order.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.customer.toLowerCase().includes(searchTerm.toLowerCase())
+  const orders = ordersRes?.orders || []
+  const ordersTotal = ordersRes?.total ?? orders.length
+
+  const { data: memosRes } = useQuery({
+    queryKey: ['memos', currentCompany?.id, page, limit],
+    queryFn: () => api.get('/sales/memos', { params: { companyId: currentCompany?.id, page, limit } }),
+    enabled: !!currentCompany,
+  })
+
+  const memos = memosRes?.memos || []
+
+  const { data: transactionsRes } = useQuery({
+    queryKey: ['transactions', currentCompany?.id, page, limit],
+    queryFn: () => api.get('/payments/transactions', { params: { companyId: currentCompany?.id, page: 1, limit: 10 } }),
+    enabled: !!currentCompany,
+  })
+
+  const transactions = transactionsRes?.transactions || []
+
+  const salesData = useMemo(() => {
+    // Map monthly aggregation into chart-friendly array
+    return (stats.monthly || []).map(m => ({
+      month: `${m._id.month}/${m._id.year}`,
+      sales: m.total || 0,
+      orders: m.orders || 0
+    }))
+  }, [stats.monthly])
+
+  const filteredOrders = (orders || []).filter(order =>
+    (order.orderNumber || order.orderNumberString || '').toString().toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (order.customer?.name || order.customer || '').toString().toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const statusCounts = useMemo(() => {
+    const map = {}
+    for (const o of orders) {
+      const s = o.status || o.orderStatus || 'Pending'
+      map[s] = (map[s] || 0) + 1
+    }
+    // Ensure common statuses exist
+    const statuses = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled']
+    return statuses.map(s => ({ status: s, count: map[s] || 0, color: s === 'Pending' ? 'bg-amber-500' : s === 'Confirmed' ? 'bg-blue-500' : s === 'Processing' ? 'bg-purple-500' : s === 'Shipped' ? 'bg-cyan-500' : s === 'Delivered' ? 'bg-green-500' : 'bg-red-500' }))
+  }, [orders])
 
   const getPaymentColor = (status) => {
     const colors = {
@@ -297,7 +233,7 @@ const Sales = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳1.25M</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(stats.totalSales || 0)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
               +23% from last month
@@ -310,7 +246,7 @@ const Sales = () => {
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">156</div>
+            <div className="text-2xl font-bold">{stats.totalOrders ?? ordersTotal}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
               +15% from last month
@@ -323,7 +259,7 @@ const Sales = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">85</div>
+            <div className="text-2xl font-bold">{stats.activeCustomers}</div>
             <p className="text-xs text-muted-foreground">
               +8 new this month
             </p>
@@ -335,7 +271,7 @@ const Sales = () => {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳8,012</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(stats.avgOrder || 0)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
               +5% from last month
@@ -454,7 +390,7 @@ const Sales = () => {
                 </TableBody>
               </Table>
 
-              {filteredOrders.length === 0 && (
+              {filteredOrders.length === 0 && (!ordersRes || (ordersRes && ordersRes.total === 0)) && (
                 <div className="py-12 text-center">
                   <ShoppingCart className="mx-auto h-12 w-12 text-muted-foreground" />
                   <h3 className="mt-4 text-lg font-semibold">No orders found</h3>
@@ -476,13 +412,7 @@ const Sales = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[
-                    { status: 'Pending', count: 8, color: 'bg-amber-500' },
-                    { status: 'Confirmed', count: 12, color: 'bg-blue-500' },
-                    { status: 'Processing', count: 15, color: 'bg-purple-500' },
-                    { status: 'Shipped', count: 10, color: 'bg-cyan-500' },
-                    { status: 'Delivered', count: 111, color: 'bg-green-500' },
-                  ].map((stat) => (
+                  {statusCounts.map((stat) => (
                     <div key={stat.status} className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">{stat.status}</span>
@@ -491,7 +421,7 @@ const Sales = () => {
                       <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
                         <div
                           className={`h-full rounded-full ${stat.color}`}
-                          style={{ width: `${(stat.count / 156) * 100}%` }}
+                          style={{ width: `${(stat.count / Math.max(stats.totalOrders || ordersTotal || 1, 1)) * 100}%` }}
                         />
                       </div>
                     </div>

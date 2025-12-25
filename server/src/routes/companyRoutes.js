@@ -7,6 +7,8 @@ const {
   updateCompany,
   deleteCompany,
   getCompanyStats
+  ,
+  getCompanyUsersCount
 } = require('../controllers/companyController')
 const { protect } = require('../middleware/authMiddleware')
 const { checkCompanyAccess } = require('../middleware/roleMiddleware')
@@ -19,6 +21,7 @@ router.get('/:id', getCompany)
 router.put('/:id', updateCompany)
 router.delete('/:id', deleteCompany)
 router.get('/:id/stats', getCompanyStats)
+router.get('/:id/users-count', getCompanyUsersCount)
 
 module.exports = router
 

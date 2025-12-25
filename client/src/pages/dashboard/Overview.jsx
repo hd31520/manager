@@ -1,7 +1,11 @@
+import { useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import StatsCards from '../../components/dashboard/StatsCards'
 import QuickActions from '../../components/dashboard/QuickActions'
 import RecentActivity from '../../components/dashboard/RecentActivity'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
 import { Button } from '../../components/ui/button'
 import { Calendar, Download, Filter } from 'lucide-react'
@@ -22,40 +26,122 @@ import {
 } from 'recharts'
 
 const Dashboard = () => {
-  // Sample data for charts
-  const salesData = [
-    { month: 'Jan', sales: 4000, orders: 24 },
-    { month: 'Feb', sales: 3000, orders: 18 },
-    { month: 'Mar', sales: 5000, orders: 30 },
-    { month: 'Apr', sales: 4500, orders: 27 },
-    { month: 'May', sales: 6000, orders: 36 },
-    { month: 'Jun', sales: 5500, orders: 33 },
-  ]
+  const { currentCompany } = useAuth()
 
-  const expenseData = [
-    { name: 'Salary', value: 40000, color: '#3B82F6' },
-    { name: 'Raw Materials', value: 30000, color: '#10B981' },
-    { name: 'Rent', value: 15000, color: '#F59E0B' },
-    { name: 'Utilities', value: 8000, color: '#EF4444' },
-    { name: 'Others', value: 7000, color: '#8B5CF6' },
-  ]
+  // Fetch recent orders (sales), inventory, inventory alerts, customers, and transactions
+  const { data: ordersRes, isLoading: ordersLoading } = useQuery({
+    queryKey: ['orders', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/sales/orders', { params: { companyId: currentCompany?.id, limit: 6 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
 
-  const attendanceData = [
-    { day: 'Mon', present: 85, absent: 15 },
-    { day: 'Tue', present: 90, absent: 10 },
-    { day: 'Wed', present: 88, absent: 12 },
-    { day: 'Thu', present: 92, absent: 8 },
-    { day: 'Fri', present: 87, absent: 13 },
-    { day: 'Sat', present: 80, absent: 20 },
-  ]
+  const { data: inventoryRes, isLoading: inventoryLoading } = useQuery({
+    queryKey: ['inventory', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/inventory', { params: { companyId: currentCompany?.id, limit: 6 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
 
-  const inventoryData = [
-    { name: 'Wooden Chair', stock: 120, min: 50 },
-    { name: 'Steel Table', stock: 85, min: 40 },
-    { name: 'Sofa Set', stock: 45, min: 20 },
-    { name: 'Bed Frame', stock: 60, min: 30 },
-    { name: 'Wardrobe', stock: 30, min: 15 },
-  ]
+  const { data: alertsRes, isLoading: alertsLoading } = useQuery({
+    queryKey: ['inventoryAlerts', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/inventory/alerts', { params: { companyId: currentCompany?.id } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const { data: customersRes, isLoading: customersLoading } = useQuery({
+    queryKey: ['customers', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/customers', { params: { companyId: currentCompany?.id, limit: 6 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const { data: transactionsRes, isLoading: transactionsLoading } = useQuery({
+    queryKey: ['transactions', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/payments/transactions', { params: { companyId: currentCompany?.id, limit: 50 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const orders = ordersRes?.orders || []
+  const inventory = inventoryRes?.inventory || []
+  const alerts = alertsRes?.alerts || { lowStock: 0, outOfStock: 0, products: { lowStock: [], outOfStock: [] } }
+  const customers = customersRes?.customers || []
+  const transactions = transactionsRes?.transactions || []
+
+  const { data: workersRes } = useQuery({
+    queryKey: ['workers', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/workers', { params: { companyId: currentCompany?.id, limit: 6 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const { data: productsRes } = useQuery({
+    queryKey: ['products', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/products', { params: { companyId: currentCompany?.id, limit: 6 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const workers = workersRes?.workers || []
+  const products = productsRes?.products || []
+
+  const statsData = useMemo(() => ({
+    totalWorkers: workersRes?.total || workers.length || 0,
+    totalSales: transactions.filter(t => t.type === 'income').reduce((s, t) => s + (t.amount || 0), 0),
+    monthlySalary: 0,
+    totalProducts: productsRes?.total || products.length || 0,
+    activeOrders: ordersRes?.count || orders.length || 0,
+    todayAttendance: 0,
+  }), [workersRes, productsRes, transactions, ordersRes, workers, products, orders])
+
+  const salesData = useMemo(() => {
+    // Build monthly sales data from transactions (group by month)
+    if (!transactions || transactions.length === 0) return []
+    const map = {}
+    transactions.forEach(t => {
+      if (t.type !== 'income') return
+      const d = new Date(t.date || t.createdAt)
+      const key = `${d.getFullYear()}-${d.getMonth() + 1}`
+      map[key] = map[key] || { month: `${d.getMonth() + 1}/${d.getFullYear()}`, sales: 0, orders: 0 }
+      map[key].sales += t.amount || 0
+      map[key].orders += 1
+    })
+    return Object.values(map).slice(-6)
+  }, [transactions])
+
+  const expenseData = useMemo(() => {
+    if (!transactions || transactions.length === 0) return []
+    const grouped = {}
+    transactions.forEach(t => {
+      if (t.type !== 'expense') return
+      const name = t.description || 'Expense'
+      grouped[name] = (grouped[name] || 0) + (t.amount || 0)
+    })
+    return Object.entries(grouped).map(([name, value], idx) => ({ name, value, color: ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6'][idx % 5] }))
+  }, [transactions])
+
+  const attendanceData = [] // attendance requires separate endpoint — keep empty if not available
+
+  const inventoryData = useMemo(() => {
+    if (!inventory || inventory.length === 0) return []
+    return inventory.slice(0,6).map(item => ({ name: item.product?.name || item.name || 'Unknown', stock: item.quantity || item.inventory?.quantity || 0, min: item.product?.inventory?.minStock || item.min || 0 }))
+  }, [inventory])
 
   return (
     <div className="space-y-6">
@@ -78,7 +164,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <StatsCards />
+      <StatsCards data={statsData} />
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
         <div className="col-span-4 space-y-6">
@@ -105,29 +191,35 @@ const Dashboard = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={salesData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Line
-                          type="monotone"
-                          dataKey="sales"
-                          stroke="#3B82F6"
-                          strokeWidth={2}
-                          name="Sales (BDT)"
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="orders"
-                          stroke="#10B981"
-                          strokeWidth={2}
-                          name="Orders"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    {transactionsLoading ? (
+                      <div className="flex h-full items-center justify-center">Loading sales...</div>
+                    ) : salesData.length === 0 ? (
+                      <div className="flex h-full items-center justify-center">No sales data</div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={salesData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="month" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="sales"
+                            stroke="#3B82F6"
+                            strokeWidth={2}
+                            name="Sales (BDT)"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="orders"
+                            stroke="#10B981"
+                            strokeWidth={2}
+                            name="Orders"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -143,25 +235,29 @@ const Dashboard = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={attendanceData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="day" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Bar
-                          dataKey="present"
-                          fill="#10B981"
-                          name="Present %"
-                        />
-                        <Bar
-                          dataKey="absent"
-                          fill="#EF4444"
-                          name="Absent %"
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {attendanceData.length === 0 ? (
+                      <div className="flex h-full items-center justify-center">No attendance data</div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={attendanceData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="day" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Bar
+                            dataKey="present"
+                            fill="#10B981"
+                            name="Present %"
+                          />
+                          <Bar
+                            dataKey="absent"
+                            fill="#EF4444"
+                            name="Absent %"
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -177,25 +273,31 @@ const Dashboard = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={inventoryData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Bar
-                          dataKey="stock"
-                          fill="#3B82F6"
-                          name="Current Stock"
-                        />
-                        <Bar
-                          dataKey="min"
-                          fill="#F59E0B"
-                          name="Minimum Required"
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {inventoryLoading ? (
+                      <div className="flex h-full items-center justify-center">Loading inventory...</div>
+                    ) : inventoryData.length === 0 ? (
+                      <div className="flex h-full items-center justify-center">No inventory data</div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={inventoryData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Bar
+                            dataKey="stock"
+                            fill="#3B82F6"
+                            name="Current Stock"
+                          />
+                          <Bar
+                            dataKey="min"
+                            fill="#F59E0B"
+                            name="Minimum Required"
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -219,39 +321,49 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={expenseData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {expenseData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => [`৳${value}`, 'Amount']} />
-                </PieChart>
-              </ResponsiveContainer>
+              {transactionsLoading ? (
+                <div className="flex h-full items-center justify-center">Loading expenses...</div>
+              ) : expenseData.length === 0 ? (
+                <div className="flex h-full items-center justify-center">No expense data</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={expenseData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {expenseData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => [`৳${value}`, 'Amount']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              {expenseData.map((item) => (
-                <div key={item.name} className="flex items-center">
-                  <div
-                    className="mr-2 h-3 w-3 rounded-full"
-                    style={{ backgroundColor: item.color }}
-                  />
-                  <span className="text-sm">{item.name}</span>
-                  <span className="ml-auto text-sm font-medium">
-                    ৳{item.value.toLocaleString()}
-                  </span>
-                </div>
-              ))}
+              {expenseData.length === 0 ? (
+                <div className="col-span-2 text-center text-sm text-muted-foreground">No expenses recorded</div>
+              ) : (
+                expenseData.map((item) => (
+                  <div key={item.name} className="flex items-center">
+                    <div
+                      className="mr-2 h-3 w-3 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span className="text-sm">{item.name}</span>
+                    <span className="ml-auto text-sm font-medium">
+                      ৳{item.value.toLocaleString()}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
@@ -270,7 +382,7 @@ const Dashboard = () => {
                   <div>
                     <h4 className="font-medium">Salary Payment</h4>
                     <p className="text-sm text-muted-foreground">
-                      Due in 3 days for 25 workers
+                      Due in 3 days
                     </p>
                   </div>
                   <Button size="sm">Process</Button>
@@ -282,7 +394,7 @@ const Dashboard = () => {
                   <div>
                     <h4 className="font-medium">Low Stock Alert</h4>
                     <p className="text-sm text-muted-foreground">
-                      5 products below minimum stock
+                      {alerts.lowStock ?? 0} products below minimum stock
                     </p>
                   </div>
                   <Button size="sm" variant="outline">View</Button>
@@ -294,7 +406,7 @@ const Dashboard = () => {
                   <div>
                     <h4 className="font-medium">Pending Orders</h4>
                     <p className="text-sm text-muted-foreground">
-                      8 orders waiting for confirmation
+                      {ordersRes?.count ?? orders.length} orders waiting for confirmation
                     </p>
                   </div>
                   <Button size="sm" variant="outline">Review</Button>

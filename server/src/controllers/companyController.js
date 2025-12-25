@@ -252,3 +252,20 @@ exports.getCompanyStats = async (req, res, next) => {
   }
 }
 
+// @desc    Get active users count for a company
+// @route   GET /api/companies/:id/users-count
+// @access  Private
+exports.getCompanyUsersCount = async (req, res, next) => {
+  try {
+    const companyId = req.params.id
+    const count = await CompanyUser.countDocuments({ company: companyId, isActive: true })
+
+    res.json({
+      success: true,
+      count
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+

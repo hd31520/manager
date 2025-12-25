@@ -16,7 +16,7 @@ import { Bell, Moon, Sun, User, Settings, LogOut, Home } from 'lucide-react'
 import { Badge } from '../ui/badge'
 
 const Header = ({ admin = false }) => {
-  const { user, logout } = useAuth()
+  const { user, logout, currentCompany } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const [notifications] = useState(3)
@@ -111,7 +111,10 @@ const Header = ({ admin = false }) => {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/dashboard/profile')}>
+              <DropdownMenuItem onClick={() => {
+                const cid = currentCompany?._id || currentCompany?.id || user?.company?._id || user?.company?.id
+                navigate(cid ? `/dashboard/profile/${cid}` : '/dashboard/profile')
+              }}>
                 <User className="mr-2 h-4 w-4" />
                 Profile
               </DropdownMenuItem>

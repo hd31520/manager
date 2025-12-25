@@ -1,4 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useParams } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
+import { toast } from 'react-hot-toast'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -28,50 +33,86 @@ const Profile = () => {
   const [activeTab, setActiveTab] = useState('personal')
   const [showPassword, setShowPassword] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const { currentCompany } = useAuth()
+  const params = useParams()
+  const routeCompanyId = params.companyId
 
-  const userData = {
-    name: 'Abdul Karim',
-    email: 'abdul.karim@example.com',
-    phone: '+8801712345678',
-    role: 'Company Owner',
-    company: 'Karim Furniture Factory',
-    joinDate: '15 March 2023',
-    lastLogin: '2 hours ago',
-    nid: '1234567890123',
-    address: '123 Factory Road, Dhaka 1212, Bangladesh',
-    bio: 'Factory owner with 15 years of experience in furniture manufacturing.',
-    avatar: '',
-  }
+  const { data: profileData } = useQuery({
+    queryKey: ['profile'],
+    queryFn: () => api.get('/users/me'),
+    // keep data fresh for interactive/dynamic pages
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
 
-  const subscriptionData = {
-    plan: 'Premium',
-    workers: '25/50',
-    renewal: '15 January 2025',
-    price: '৳500/month',
-    status: 'active',
-    features: [
-      'Up to 50 workers',
-      'Advanced analytics',
-      'Custom reports',
-      'API access',
-      'Priority support',
-    ],
-  }
+  const userData = profileData?.user || {}
 
-  const notificationSettings = {
-    email: {
-      sales: true,
-      salary: true,
-      inventory: false,
-      reports: true,
+  const queryClient = useQueryClient()
+
+  // Local form state for editable fields
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [address, setAddress] = useState('')
+  const [bio, setBio] = useState('')
+  const [nid, setNid] = useState('')
+
+  useEffect(() => {
+    setName(userData.name || '')
+    setEmail(userData.email || '')
+    setPhone(userData.phone || '')
+    setAddress(userData.address || '')
+    setBio(userData.bio || '')
+    setNid(userData.nid || '')
+  }, [userData])
+
+  const { data: subscriptionResp, isLoading: subscriptionLoading } = useQuery({
+    queryKey: ['subscription', routeCompanyId || currentCompany?.id || currentCompany?._id],
+    queryFn: () => {
+      const cid = routeCompanyId || currentCompany?.id || currentCompany?._id
+      return api.get(`/subscriptions/${cid}`).then(res => res.data)
     },
-    push: {
-      sales: false,
-      salary: true,
-      inventory: true,
-      reports: false,
+    enabled: !!(routeCompanyId || currentCompany),
+  })
+
+  const subscriptionData = subscriptionResp?.subscription || null
+
+  const { data: notificationsResp } = useQuery({ queryKey: ['notifications'], queryFn: () => api.get('/users/me/notifications').then(res => res.data), enabled: false })
+  const notificationSettings = notificationsResp?.settings || { email: {}, push: {} }
+
+  // Fetch available plans from server
+  const { data: plansResp, isLoading: plansLoading } = useQuery({
+    queryKey: ['plans'],
+    queryFn: () => api.get('/subscriptions/plans'),
+  })
+
+  const plans = plansResp?.plans || {}
+
+  // Mutation to change subscription plan
+  const changePlanMutation = useMutation({
+    mutationFn: ({ companyId, plan }) => api.put(`/subscriptions/${companyId}`, { plan }),
+    onSuccess: (res) => {
+      toast.success('Subscription updated')
+      // refresh subscription info
+      queryClient.invalidateQueries(['subscription'])
     },
-  }
+    onError: (err) => {
+      toast.error(err.response?.data?.message || 'Failed to change plan')
+    }
+  })
+
+  // Update profile mutation
+  const updateMutation = useMutation({
+    mutationFn: (payload) => api.put('/users/me', payload),
+    onSuccess: (data) => {
+      toast.success('Profile updated')
+      queryClient.invalidateQueries(['profile'])
+      setIsEditing(false)
+    },
+    onError: (err) => {
+      toast.error(err.response?.data?.message || 'Failed to update profile')
+    }
+  })
 
   return (
     <div className="space-y-6">
@@ -85,12 +126,45 @@ const Profile = () => {
         <div className="flex items-center gap-3">
           {isEditing ? (
             <>
-              <Button variant="outline" onClick={() => setIsEditing(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // reset form values
+                  setName(userData.name || '')
+                  setEmail(userData.email || '')
+                  setPhone(userData.phone || '')
+                  setAddress(userData.address || '')
+                  setBio(userData.bio || '')
+                  setNid(userData.nid || '')
+                  setIsEditing(false)
+                }}
+              >
                 Cancel
               </Button>
-              <Button>
-                <Save className="mr-2 h-4 w-4" />
-                Save Changes
+              <Button
+                onClick={() => {
+                  // client-side validation
+                  if (!name || name.trim() === '') {
+                    toast.error('Name is required')
+                    return
+                  }
+
+                  const payload = { name: name.trim(), phone: phone?.trim() || '', address: address?.trim() || '' }
+                  updateMutation.mutate(payload)
+                }}
+                disabled={updateMutation.isLoading}
+              >
+                {updateMutation.isLoading ? (
+                  <>
+                    <Save className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Changes
+                  </>
+                )}
               </Button>
             </>
           ) : (
@@ -124,9 +198,9 @@ const Profile = () => {
                   <div className="flex items-center gap-6">
                     <div className="relative">
                       <Avatar className="h-24 w-24">
-                        <AvatarImage src={userData.avatar} alt={userData.name} />
+                        <AvatarImage src={userData.profileImage || userData.avatar} alt={userData.name || 'User'} />
                         <AvatarFallback className="text-2xl">
-                          {userData.name.split(' ').map(n => n[0]).join('')}
+                          {(userData.name || '').split(' ').map(n => n[0]).join('') || 'U'}
                         </AvatarFallback>
                       </Avatar>
                       {isEditing && (
@@ -136,7 +210,7 @@ const Profile = () => {
                       )}
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold">{userData.name}</h3>
+                      <h3 className="text-xl font-bold">{userData.name || 'Unnamed User'}</h3>
                       <p className="text-muted-foreground">{userData.role}</p>
                       <div className="mt-2 flex items-center gap-2">
                         <Badge variant="outline">{userData.company}</Badge>
@@ -154,7 +228,8 @@ const Profile = () => {
                         <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="name"
-                          defaultValue={userData.name}
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
                           className="pl-9"
                           disabled={!isEditing}
                         />
@@ -168,9 +243,10 @@ const Profile = () => {
                         <Input
                           id="email"
                           type="email"
-                          defaultValue={userData.email}
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
                           className="pl-9"
-                          disabled={!isEditing}
+                          disabled
                         />
                       </div>
                     </div>
@@ -181,7 +257,8 @@ const Profile = () => {
                         <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="phone"
-                          defaultValue={userData.phone}
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
                           className="pl-9"
                           disabled={!isEditing}
                         />
@@ -192,7 +269,8 @@ const Profile = () => {
                       <Label htmlFor="nid">NID Number</Label>
                       <Input
                         id="nid"
-                        defaultValue={userData.nid}
+                        value={nid}
+                        onChange={(e) => setNid(e.target.value)}
                         disabled={!isEditing}
                       />
                     </div>
@@ -203,7 +281,8 @@ const Profile = () => {
                         <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                         <Textarea
                           id="address"
-                          defaultValue={userData.address}
+                          value={address}
+                          onChange={(e) => setAddress(e.target.value)}
                           className="pl-9"
                           disabled={!isEditing}
                           rows={3}
@@ -215,7 +294,8 @@ const Profile = () => {
                       <Label htmlFor="bio">Bio</Label>
                       <Textarea
                         id="bio"
-                        defaultValue={userData.bio}
+                        value={bio}
+                        onChange={(e) => setBio(e.target.value)}
                         disabled={!isEditing}
                         rows={4}
                       />
@@ -366,43 +446,57 @@ const Profile = () => {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="rounded-lg border p-6">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="text-2xl font-bold">{subscriptionData.plan} Plan</h3>
-                        <p className="text-muted-foreground">{subscriptionData.price}</p>
-                        <div className="mt-4 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Users className="h-4 w-4 text-muted-foreground" />
-                            <span>Workers: {subscriptionData.workers}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-4 w-4 text-muted-foreground" />
-                            <span>Renewal: {subscriptionData.renewal}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant={
-                                subscriptionData.status === 'active'
-                                  ? 'default'
-                                  : 'secondary'
-                              }
-                            >
-                              {subscriptionData.status}
-                            </Badge>
+                    {subscriptionLoading ? (
+                      <div>Loading subscription...</div>
+                    ) : subscriptionData ? (
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-2xl font-bold">{subscriptionData.plan} Plan</h3>
+                          <p className="text-muted-foreground">{subscriptionData.price}</p>
+                          <div className="mt-4 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Users className="h-4 w-4 text-muted-foreground" />
+                              <span>Workers: {subscriptionData.workers}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-4 w-4 text-muted-foreground" />
+                              <span>Renewal: {subscriptionData.renewal}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                variant={
+                                  subscriptionData.status === 'active'
+                                    ? 'default'
+                                    : 'secondary'
+                                }
+                              >
+                                {subscriptionData.status}
+                              </Badge>
+                            </div>
                           </div>
                         </div>
+                        <Button variant="outline">
+                          <CreditCard className="mr-2 h-4 w-4" />
+                          Update Payment
+                        </Button>
                       </div>
-                      <Button variant="outline">
-                        <CreditCard className="mr-2 h-4 w-4" />
-                        Update Payment
-                      </Button>
-                    </div>
+                    ) : (
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-2xl font-bold">No Active Subscription</h3>
+                          <p className="text-muted-foreground">You are currently on the free plan.</p>
+                        </div>
+                        <div>
+                          <Button>Choose Plan</Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>
                     <h4 className="mb-4 font-semibold">Plan Features</h4>
                     <div className="grid gap-3 md:grid-cols-2">
-                      {subscriptionData.features.map((feature, index) => (
+                      {(subscriptionData?.features || []).map((feature, index) => (
                         <div key={index} className="flex items-center gap-2">
                           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
                             <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
@@ -418,31 +512,40 @@ const Profile = () => {
                   <div className="space-y-4">
                     <h4 className="font-semibold">Upgrade Plan</h4>
                     <div className="grid gap-4 md:grid-cols-3">
-                      <div className="rounded-lg border p-4">
-                        <h5 className="font-medium">Basic</h5>
-                        <p className="text-2xl font-bold">৳200<span className="text-sm font-normal text-muted-foreground">/month</span></p>
-                        <p className="text-sm text-muted-foreground">1-10 Workers</p>
-                        <Button size="sm" className="mt-3 w-full" variant="outline">
-                          Downgrade
-                        </Button>
+                        {plansLoading ? (
+                          <div className="col-span-3 flex items-center justify-center p-4">Loading plans...</div>
+                        ) : (
+                          Object.keys(plans).map((key) => {
+                            const p = plans[key]
+                            const isCurrent = subscriptionData?.plan === key
+                            return (
+                              <div key={key} className={`rounded-lg border p-4 ${isCurrent ? 'border-2 border-primary' : ''}`}>
+                                <h5 className="font-medium">{p.name}</h5>
+                                <p className="text-2xl font-bold">৳{p.monthlyFee}<span className="text-sm font-normal text-muted-foreground">/month</span></p>
+                                <p className="text-sm text-muted-foreground">Workers: {p.workerLimit === Infinity ? 'Unlimited' : p.workerLimit}</p>
+                                <div className="mt-3 space-y-1">
+                                  { (p.features || []).map((f, i) => (
+                                    <div key={i} className="text-sm text-muted-foreground">• {f}</div>
+                                  ))}
+                                </div>
+                                <Button
+                                  size="sm"
+                                  className="mt-3 w-full"
+                                  variant={isCurrent ? 'outline' : 'default'}
+                                  disabled={isCurrent || changePlanMutation.isLoading}
+                                  onClick={() => {
+                                    const companyId = routeCompanyId || currentCompany?._id || currentCompany?.id
+                                    if (!companyId) return toast.error('No company selected')
+                                    changePlanMutation.mutate({ companyId, plan: key })
+                                  }}
+                                >
+                                  {isCurrent ? 'Current' : 'Choose'}
+                                </Button>
+                              </div>
+                            )
+                          })
+                        )}
                       </div>
-                      <div className="rounded-lg border-2 border-primary p-4">
-                        <h5 className="font-medium">Standard</h5>
-                        <p className="text-2xl font-bold">৳300<span className="text-sm font-normal text-muted-foreground">/month</span></p>
-                        <p className="text-sm text-muted-foreground">11-20 Workers</p>
-                        <Button size="sm" className="mt-3 w-full" variant="outline">
-                          Current
-                        </Button>
-                      </div>
-                      <div className="rounded-lg border p-4">
-                        <h5 className="font-medium">Premium</h5>
-                        <p className="text-2xl font-bold">৳500<span className="text-sm font-normal text-muted-foreground">/month</span></p>
-                        <p className="text-sm text-muted-foreground">21-50 Workers</p>
-                        <Button size="sm" className="mt-3 w-full">
-                          Upgrade
-                        </Button>
-                      </div>
-                    </div>
                   </div>
                 </CardContent>
               </Card>

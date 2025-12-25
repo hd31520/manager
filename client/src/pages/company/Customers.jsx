@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -33,88 +36,36 @@ import {
 
 const Customers = () => {
   const [searchTerm, setSearchTerm] = useState('')
-  
-  const customers = [
-    {
-      id: 1,
-      name: 'ABC Corporation',
-      email: 'purchase@abccorp.com',
-      phone: '+8801712345678',
-      type: 'Corporate',
-      creditLimit: '৳500,000',
-      currentDue: '৳125,000',
-      totalPurchased: '৳1,250,000',
-      lastPurchase: '2024-01-15',
-      status: 'active',
-      avatar: '',
-    },
-    {
-      id: 2,
-      name: 'XYZ Retail',
-      email: 'info@xyzretail.com',
-      phone: '+8801712345679',
-      type: 'Wholesale',
-      creditLimit: '৳300,000',
-      currentDue: '৳75,000',
-      totalPurchased: '৳850,000',
-      lastPurchase: '2024-01-14',
-      status: 'active',
-      avatar: '',
-    },
-    {
-      id: 3,
-      name: 'DEF Enterprises',
-      email: 'contact@defent.com',
-      phone: '+8801712345680',
-      type: 'Corporate',
-      creditLimit: '৳750,000',
-      currentDue: '৳0',
-      totalPurchased: '৳2,100,000',
-      lastPurchase: '2024-01-12',
-      status: 'active',
-      avatar: '',
-    },
-    {
-      id: 4,
-      name: 'Individual Customer',
-      email: 'customer@example.com',
-      phone: '+8801712345681',
-      type: 'Retail',
-      creditLimit: '৳50,000',
-      currentDue: '৳12,500',
-      totalPurchased: '৳185,000',
-      lastPurchase: '2024-01-13',
-      status: 'active',
-      avatar: '',
-    },
-    {
-      id: 5,
-      name: 'GHI Traders',
-      email: 'sales@ghitraders.com',
-      phone: '+8801712345682',
-      type: 'Wholesale',
-      creditLimit: '৳400,000',
-      currentDue: '৳200,000',
-      totalPurchased: '৳950,000',
-      lastPurchase: '2024-01-11',
-      status: 'inactive',
-      avatar: '',
-    },
-  ]
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(10)
+  const { currentCompany } = useAuth()
 
-  const filteredCustomers = customers.filter(customer =>
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.phone.includes(searchTerm)
-  )
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['customers', currentCompany?.id, page, limit, searchTerm],
+    queryFn: () => api.get('/customers', { params: { companyId: currentCompany?.id, page, limit, search: searchTerm } }),
+    enabled: !!currentCompany,
+  })
+
+  const customers = data?.customers || []
+  const totalCustomers = data?.total ?? customers.length
+
+  const filteredCustomers = (customers || []).filter(customer => {
+    const name = (customer.name || '').toString().toLowerCase()
+    const email = (customer.email || '').toString().toLowerCase()
+    const phone = (customer.phone || '').toString().toLowerCase()
+    const q = searchTerm.toLowerCase()
+    return name.includes(q) || email.includes(q) || phone.includes(q)
+  })
 
   const getTypeColor = (type) => {
+    const t = (type || '').toString().toLowerCase()
     const colors = {
-      'Corporate': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
-      'Wholesale': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
-      'Retail': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
+      'corporate': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
+      'wholesale': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
+      'retail': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
+      'walk_in': 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
     }
-    return colors[type] || 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
+    return colors[t] || 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300'
   }
 
   const getStatusColor = (status) => {
@@ -122,6 +73,11 @@ const Customers = () => {
       ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
       : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
   }
+
+  // Derived metrics
+  const totalOutstanding = (customers || []).reduce((sum, c) => sum + (Number(c.dueAmount || 0)), 0)
+  const activeCustomers = (customers || []).filter(c => c.isActive).length
+  const avgPurchase = (customers && customers.length) ? Math.round(((customers.reduce((s, c) => s + (Number(c.totalPurchases || 0)), 0)) / customers.length)) : 0
 
   return (
     <div className="space-y-6">
@@ -151,9 +107,9 @@ const Customers = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">85</div>
+            <div className="text-2xl font-bold">{totalCustomers}</div>
             <p className="text-xs text-muted-foreground">
-              +8 new this month
+              {customers.length > 0 ? `Showing ${customers.length} customers` : 'No customers yet'}
             </p>
           </CardContent>
         </Card>
@@ -163,10 +119,10 @@ const Customers = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳412,500</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(totalOutstanding || 0)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-red-600" />
-              +5% from last month
+              {customers.length > 0 ? `Based on ${customers.length} customers` : ''}
             </p>
           </CardContent>
         </Card>
@@ -176,9 +132,9 @@ const Customers = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">78</div>
+            <div className="text-2xl font-bold">{activeCustomers}</div>
             <p className="text-xs text-muted-foreground">
-              92% active rate
+              {customers.length ? `${Math.round((activeCustomers / customers.length) * 100)}% active rate` : ''}
             </p>
           </CardContent>
         </Card>
@@ -188,7 +144,7 @@ const Customers = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳14,706</div>
+            <div className="text-2xl font-bold">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(avgPurchase || 0)}</div>
             <p className="text-xs text-muted-foreground">
               Per customer
             </p>
@@ -238,19 +194,19 @@ const Customers = () => {
             </TableHeader>
             <TableBody>
               {filteredCustomers.map((customer) => (
-                <TableRow key={customer.id}>
+                <TableRow key={customer._id || customer.id}>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <Avatar>
-                        <AvatarImage src={customer.avatar} />
+                        <AvatarImage src={customer.avatar} alt={customer.name || 'Customer'} />
                         <AvatarFallback>
-                          {customer.name.split(' ').map(n => n[0]).join('')}
+                          {(customer.name || '').split(' ').map(n => n[0]).join('') || 'C'}
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <div className="font-medium">{customer.name}</div>
+                        <div className="font-medium">{customer.name || 'Unnamed Customer'}</div>
                         <div className="text-sm text-muted-foreground">
-                          ID: CUST-{customer.id.toString().padStart(3, '0')}
+                          ID: CUST-{(customer._id || '').toString().slice(-6).toUpperCase()}
                         </div>
                       </div>
                     </div>
@@ -259,38 +215,38 @@ const Customers = () => {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 text-sm">
                         <Phone className="h-3 w-3" />
-                        {customer.phone}
+                        {customer.phone || '-'}
                       </div>
                       <div className="flex items-center gap-2 text-sm">
                         <Mail className="h-3 w-3" />
-                        {customer.email}
+                        {customer.email || '-'}
                       </div>
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge className={getTypeColor(customer.type)}>
-                      {customer.type}
+                    <Badge className={getTypeColor(customer.customerType)}>
+                      {(customer.customerType || '').toString().replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium">{customer.creditLimit}</div>
+                    <div className="font-medium">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(customer.creditLimit || 0)}</div>
                   </TableCell>
                   <TableCell>
-                    <div className={`font-medium ${customer.currentDue !== '৳0' ? 'text-red-600' : 'text-green-600'}`}>
-                      {customer.currentDue}
+                    <div className={`font-medium ${Number(customer.dueAmount || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(customer.dueAmount || 0)}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium">{customer.totalPurchased}</div>
+                    <div className="font-medium">{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(customer.totalPurchases || 0)}</div>
                   </TableCell>
                   <TableCell>
                     <div className="text-sm text-muted-foreground">
-                      {customer.lastPurchase}
+                      {customer.lastPurchaseDate ? new Date(customer.lastPurchaseDate).toLocaleDateString() : '-'}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge className={getStatusColor(customer.status)}>
-                      {customer.status}
+                    <Badge className={getStatusColor(customer.isActive ? 'active' : 'inactive')}>
+                      {customer.isActive ? 'active' : 'inactive'}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -344,21 +300,18 @@ const Customers = () => {
 
           <div className="mt-6 flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
-              Showing {filteredCustomers.length} of {customers.length} customers
+              Showing {filteredCustomers.length} of {totalCustomers} customers
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
+              <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>
                 Previous
               </Button>
-              <Button variant="outline" size="sm">
-                1
-              </Button>
-              <Button variant="outline" size="sm">
-                2
-              </Button>
-              <Button variant="outline" size="sm">
-                Next
-              </Button>
+              <div className="inline-flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage(1)} className={page === 1 ? 'font-bold' : ''}>1</Button>
+                {totalCustomers > limit && (
+                  <Button variant="outline" size="sm" onClick={() => setPage(page + 1)} disabled={page * limit >= totalCustomers}>Next</Button>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>

@@ -1,4 +1,5 @@
 import { Button } from '../ui/button'
+import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import {
   UserPlus,
@@ -95,7 +96,7 @@ const QuickActions = () => {
                 className="h-auto flex-col items-center justify-center p-4"
                 asChild
               >
-                <a href={action.href}>
+                <Link to={action.href}>
                   <div
                     className={`mb-2 rounded-full p-3 ${action.bgColor}`}
                   >
@@ -105,7 +106,7 @@ const QuickActions = () => {
                   <span className="mt-1 text-xs text-muted-foreground">
                     {action.description}
                   </span>
-                </a>
+                </Link>
               </Button>
             )
           })}

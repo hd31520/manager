@@ -11,30 +11,34 @@ import {
   Download,
   MoreVertical
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
 
 const AdminDashboard = () => {
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: ['admin', 'stats'],
+    queryFn: () => api.get('/admin/stats').then((res) => res.data),
+  })
+
+  const { data: companiesData, isLoading: companiesLoading } = useQuery({
+    queryKey: ['admin', 'companies'],
+    queryFn: () => api.get('/admin/companies', { params: { limit: 5 } }).then((res) => res.data),
+  })
+
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ['admin', 'users'],
+    queryFn: () => api.get('/admin/users', { params: { limit: 5 } }).then((res) => res.data),
+  })
+
   const stats = [
-    { title: 'Total Users', value: '1,248', icon: Users, change: '+12%', trend: 'up' },
-    { title: 'Active Companies', value: '156', icon: Building, change: '+8%', trend: 'up' },
-    { title: 'Monthly Revenue', value: '৳78,500', icon: DollarSign, change: '+23%', trend: 'up' },
-    { title: 'Platform Uptime', value: '99.8%', icon: Activity, change: '+0.2%', trend: 'up' },
+    { title: 'Total Users', value: statsData?.stats?.totalUsers ?? '—', icon: Users, change: '', trend: 'up' },
+    { title: 'Active Companies', value: statsData?.stats?.totalCompanies ?? '—', icon: Building, change: '', trend: 'up' },
+    { title: 'Monthly Revenue', value: `৳${statsData?.stats?.totalRevenue ?? 0}`, icon: DollarSign, change: '', trend: 'up' },
+    { title: 'Active Subscriptions', value: statsData?.stats?.activeSubscriptions ?? '—', icon: Activity, change: '', trend: 'up' },
   ]
 
-  const recentCompanies = [
-    { id: 1, name: 'Karim Furniture', type: 'Wood Factory', users: 25, plan: 'Premium', status: 'active' },
-    { id: 2, name: 'Textile Mart', type: 'Textile Shop', users: 12, plan: 'Standard', status: 'active' },
-    { id: 3, name: 'Metal Works Inc', type: 'Iron Factory', users: 8, plan: 'Basic', status: 'active' },
-    { id: 4, name: 'Food Processing', type: 'Food Factory', users: 18, plan: 'Premium', status: 'pending' },
-    { id: 5, name: 'Plastic Products', type: 'Plastic Factory', users: 6, plan: 'Basic', status: 'suspended' },
-  ]
-
-  const recentUsers = [
-    { id: 1, name: 'Abdul Karim', email: 'abdul@example.com', company: 'Karim Furniture', role: 'Owner', status: 'active' },
-    { id: 2, name: 'Fatima Begum', email: 'fatima@example.com', company: 'Textile Mart', role: 'Manager', status: 'active' },
-    { id: 3, name: 'Raju Ahmed', email: 'raju@example.com', company: 'Metal Works', role: 'Worker', status: 'inactive' },
-    { id: 4, name: 'Sharmin Akter', email: 'sharmin@example.com', company: 'Textile Mart', role: 'Sales', status: 'active' },
-    { id: 5, name: 'Kamal Hossain', email: 'kamal@example.com', company: 'Karim Furniture', role: 'Worker', status: 'active' },
-  ]
+  const recentCompanies = companiesData?.companies ?? []
+  const recentUsers = usersData?.users ?? []
 
   return (
     <div className="space-y-6">

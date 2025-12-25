@@ -12,64 +12,83 @@ import {
   AlertCircle
 } from 'lucide-react'
 import { formatDate, formatTime } from '../../lib/utils'
+import { useQuery } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 const RecentActivity = () => {
+  const { currentCompany } = useAuth()
+
+  const { data: ordersRes, isLoading: ordersLoading } = useQuery({
+    queryKey: ['recentOrders', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/sales/orders', { params: { companyId: currentCompany?.id, limit: 5 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const { data: txRes, isLoading: txLoading } = useQuery({
+    queryKey: ['recentTransactions', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/payments/transactions', { params: { companyId: currentCompany?.id, limit: 8 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const { data: workersRes, isLoading: workersLoading } = useQuery({
+    queryKey: ['recentWorkers', currentCompany?.id],
+    queryFn: async () => {
+      const res = await api.get('/workers', { params: { companyId: currentCompany?.id, limit: 5 } })
+      return res.data ? res.data : res
+    },
+    enabled: !!currentCompany,
+  })
+
+  const orders = ordersRes?.orders || []
+  const transactions = txRes?.transactions || []
+  const workers = workersRes?.workers || []
+
+  const loading = ordersLoading && txLoading && workersLoading
+
   const activities = [
-    {
-      id: 1,
+    // map workers (new hires)
+    ...workers.map(w => ({
+      id: `worker-${w._id}`,
       type: 'worker_added',
-      user: 'Abdul Karim',
+      user: w.user?.name || 'Unknown',
       action: 'added new worker',
-      target: 'Raju Ahmed',
-      timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
+      target: w.user?.name || w.employeeId || 'Worker',
+      timestamp: w.createdAt || w.joiningDate || new Date(),
       icon: UserPlus,
-      color: 'text-blue-600 dark:text-blue-400',
-    },
-    {
-      id: 2,
+      color: 'text-blue-600 dark:text-blue-400'
+    })),
+    // map recent orders
+    ...orders.map(o => ({
+      id: `order-${o._id}`,
       type: 'sale_completed',
-      user: 'Fatima Begum',
+      user: o.createdBy?.name || o.salesPerson || 'Unknown',
       action: 'completed sale',
-      target: 'Order #ORD-00123',
-      amount: '৳15,000',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
+      target: o.orderNumber ? `Order #${o.orderNumber}` : (o._id || '').slice(-8),
+      amount: o.total ? `৳${o.total.toLocaleString()}` : null,
+      timestamp: o.createdAt || o.date || new Date(),
       icon: ShoppingCart,
-      color: 'text-green-600 dark:text-green-400',
-    },
-    {
-      id: 3,
-      type: 'salary_paid',
-      user: 'System',
-      action: 'processed salary for',
-      target: 'December 2024',
-      amount: '৳250,000',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
-      icon: DollarSign,
-      color: 'text-amber-600 dark:text-amber-400',
-    },
-    {
-      id: 4,
-      type: 'product_low_stock',
-      user: 'System',
-      action: 'low stock alert for',
-      target: 'Wooden Chair',
-      status: 'critical',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2), // 2 days ago
-      icon: Package,
-      color: 'text-red-600 dark:text-red-400',
-    },
-    {
-      id: 5,
-      type: 'attendance_marked',
-      user: 'Raju Ahmed',
-      action: 'marked attendance',
-      target: 'for today',
-      status: 'present',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3), // 3 days ago
-      icon: Calendar,
-      color: 'text-purple-600 dark:text-purple-400',
-    },
-  ]
+      color: 'text-green-600 dark:text-green-400'
+    })),
+    // map transactions (salary or expenses)
+    ...transactions.map(t => ({
+      id: `tx-${t._id}`,
+      type: t.description && t.description.toLowerCase().includes('salary') ? 'salary_paid' : 'transaction',
+      user: t.performedBy?.name || t.createdBy?.name || 'System',
+      action: t.description || (t.type === 'income' ? 'payment received' : 'payment processed'),
+      target: t.reference || '',
+      amount: t.amount ? `৳${t.amount.toLocaleString()}` : null,
+      timestamp: t.date || t.createdAt || new Date(),
+      icon: t.description && t.description.toLowerCase().includes('salary') ? DollarSign : DollarSign,
+      color: 'text-amber-600 dark:text-amber-400'
+    }))
+  ].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
 
   const getTimeAgo = (date) => {
     const seconds = Math.floor((new Date() - date) / 1000)
@@ -134,39 +153,45 @@ const RecentActivity = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          {activities.map((activity) => {
-            const Icon = activity.icon
-            return (
-              <div key={activity.id} className="flex items-start gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
-                  <Icon className={`h-4 w-4 ${activity.color}`} />
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center">
-                    <span className="font-medium">{activity.user}</span>
-                    <span className="mx-1 text-muted-foreground">
-                      {activity.action}
-                    </span>
-                    <span className="font-medium">{activity.target}</span>
-                    {activity.amount && (
-                      <span className="ml-1 font-semibold text-green-600 dark:text-green-400">
-                        {activity.amount}
+          {loading ? (
+            <div className="flex items-center justify-center p-6">Loading activity...</div>
+          ) : activities.length === 0 ? (
+            <div className="flex items-center justify-center p-6">No recent activity</div>
+          ) : (
+            activities.map((activity) => {
+              const Icon = activity.icon
+              return (
+                <div key={activity.id} className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                    <Icon className={`h-4 w-4 ${activity.color}`} />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center">
+                      <span className="font-medium">{activity.user}</span>
+                      <span className="mx-1 text-muted-foreground">
+                        {activity.action}
                       </span>
-                    )}
-                    {getStatusBadge(activity.type, activity.status)}
-                  </div>
-                  <div className="flex items-center text-sm text-muted-foreground">
-                    <Clock className="mr-1 h-3 w-3" />
-                    {getTimeAgo(activity.timestamp)}
-                    <span className="mx-2">•</span>
-                    {formatDate(activity.timestamp, 'dd MMM yyyy')}
-                    <span className="mx-2">•</span>
-                    {formatTime(activity.timestamp)}
+                      <span className="font-medium">{activity.target}</span>
+                      {activity.amount && (
+                        <span className="ml-1 font-semibold text-green-600 dark:text-green-400">
+                          {activity.amount}
+                        </span>
+                      )}
+                      {getStatusBadge(activity.type, activity.status)}
+                    </div>
+                    <div className="flex items-center text-sm text-muted-foreground">
+                      <Clock className="mr-1 h-3 w-3" />
+                      {getTimeAgo(new Date(activity.timestamp))}
+                      <span className="mx-2">•</span>
+                      {formatDate(activity.timestamp, 'dd MMM yyyy')}
+                      <span className="mx-2">•</span>
+                      {formatTime(activity.timestamp)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })
+          )}
         </div>
         <div className="mt-4 text-center">
           <button className="text-sm font-medium text-primary hover:underline">

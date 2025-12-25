@@ -48,6 +48,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="company-select" element={<CompanySelect />} />
             <Route path="profile" element={<Profile />} />
+            <Route path="profile/:companyId" element={<Profile />} />
             
             {/* Company Management Routes */}
             <Route path="workers" element={<Workers />} />

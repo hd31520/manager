@@ -105,6 +105,35 @@ exports.getProducts = async (req, res, next) => {
   }
 }
 
+// @desc    Get total stock value for a company
+// @route   GET /api/products/stock-value
+// @access  Private
+exports.getProductsStockValue = async (req, res, next) => {
+  try {
+    const { companyId } = req.query
+
+    const match = {}
+    if (companyId) match.company = require('mongoose').Types.ObjectId(companyId)
+
+    // Aggregate total = sum( inventory.quantity * price.cost )
+    const result = await Product.aggregate([
+      { $match: match },
+      { $project: { qty: '$inventory.quantity', cost: '$price.cost' } },
+      { $project: { value: { $multiply: [{ $ifNull: ['$qty', 0] }, { $ifNull: ['$cost', 0] }] } } },
+      { $group: { _id: null, totalValue: { $sum: '$value' } } }
+    ])
+
+    const totalValue = result[0]?.totalValue || 0
+
+    res.json({
+      success: true,
+      totalValue
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
 // @desc    Get single product
 // @route   GET /api/products/:id
 // @access  Private

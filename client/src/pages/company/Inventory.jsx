@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -36,97 +39,90 @@ import {
 const Inventory = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeTab, setActiveTab] = useState('overview')
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(10)
+  const { currentCompany } = useAuth()
+  const queryClient = useQueryClient()
 
-  const inventoryData = [
-    {
-      id: 1,
-      productCode: 'PROD-001',
-      productName: 'Wooden Dining Chair',
-      category: 'Furniture',
-      currentStock: 85,
-      minStock: 50,
-      maxStock: 200,
-      unit: 'pcs',
-      value: '৳212,500',
-      lastUpdated: '2024-01-15',
-      status: 'in-stock',
-    },
-    {
-      id: 2,
-      productCode: 'PROD-002',
-      productName: 'Steel Office Table',
-      category: 'Furniture',
-      currentStock: 42,
-      minStock: 40,
-      maxStock: 100,
-      unit: 'pcs',
-      value: '৳285,600',
-      lastUpdated: '2024-01-14',
-      status: 'in-stock',
-    },
-    {
-      id: 3,
-      productCode: 'PROD-003',
-      productName: 'Leather Sofa Set',
-      category: 'Furniture',
-      currentStock: 15,
-      minStock: 20,
-      maxStock: 50,
-      unit: 'set',
-      value: '৳480,000',
-      lastUpdated: '2024-01-13',
-      status: 'low-stock',
-    },
-    {
-      id: 4,
-      productCode: 'PROD-004',
-      productName: 'Wooden Bed Frame',
-      category: 'Furniture',
-      currentStock: 28,
-      minStock: 30,
-      maxStock: 80,
-      unit: 'pcs',
-      value: '৳238,000',
-      lastUpdated: '2024-01-12',
-      status: 'low-stock',
-    },
-    {
-      id: 5,
-      productCode: 'PROD-005',
-      productName: 'Metal Wardrobe',
-      category: 'Furniture',
-      currentStock: 60,
-      minStock: 25,
-      maxStock: 100,
-      unit: 'pcs',
-      value: '৳690,000',
-      lastUpdated: '2024-01-11',
-      status: 'in-stock',
-    },
-  ]
+  // Products (used as inventory items list)
+  const { data: productsRes, isLoading: productsLoading } = useQuery({
+    queryKey: ['products', currentCompany?.id, page, limit, searchTerm],
+    queryFn: () => api.get('/products', { params: { companyId: currentCompany?.id, page, limit, search: searchTerm } }),
+    enabled: !!currentCompany,
+  })
 
-  const movementData = [
-    { date: 'Jan 10', incoming: 50, outgoing: 35 },
-    { date: 'Jan 11', incoming: 30, outgoing: 42 },
-    { date: 'Jan 12', incoming: 45, outgoing: 28 },
-    { date: 'Jan 13', incoming: 25, outgoing: 38 },
-    { date: 'Jan 14', incoming: 60, outgoing: 45 },
-    { date: 'Jan 15', incoming: 40, outgoing: 32 },
-  ]
+  const products = productsRes?.products || []
+  const productsTotal = productsRes?.total ?? products.length
 
-  const categoryData = [
-    { category: 'Chairs', stock: 120, value: '৳300,000' },
-    { category: 'Tables', stock: 85, value: '৳578,000' },
-    { category: 'Sofas', stock: 45, value: '৳720,000' },
-    { category: 'Beds', stock: 60, value: '৳510,000' },
-    { category: 'Wardrobes', stock: 30, value: '৳345,000' },
-  ]
+  // Total stock value (aggregated)
+  const { data: stockValueRes } = useQuery({
+    queryKey: ['products-stock-value', currentCompany?.id],
+    queryFn: () => api.get('/products/stock-value', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+  const totalStockValue = stockValueRes?.totalValue ?? 0
 
-  const filteredInventory = inventoryData.filter(item =>
-    item.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.productCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.category.toLowerCase().includes(searchTerm.toLowerCase())
+  // Stock alerts
+  const { data: alertsRes } = useQuery({
+    queryKey: ['inventory-alerts', currentCompany?.id],
+    queryFn: () => api.get('/inventory/alerts', { params: { companyId: currentCompany?.id } }),
+    enabled: !!currentCompany,
+  })
+
+  const alerts = alertsRes?.alerts || { lowStock: 0, outOfStock: 0, products: { lowStock: [], outOfStock: [] } }
+
+  // Inventory movement/history
+  const { data: historyRes } = useQuery({
+    queryKey: ['inventory-history', currentCompany?.id, page, limit],
+    queryFn: () => api.get('/inventory', { params: { companyId: currentCompany?.id, page, limit } }),
+    enabled: !!currentCompany,
+  })
+  const history = historyRes?.inventory || []
+
+  // Compute categories summary from products
+  const categoryData = useMemo(() => {
+    const map = {}
+    for (const p of products) {
+      const cat = (p.category && p.category.name) || p.category || 'Uncategorized'
+      if (!map[cat]) map[cat] = { category: cat, stock: 0, value: 0 }
+      const qty = p.inventory?.quantity || 0
+      const cost = p.price?.cost || 0
+      map[cat].stock += qty
+      map[cat].value += qty * cost
+    }
+    return Object.values(map).map(c => ({ ...c, value: `৳${Number(c.value).toLocaleString()}` }))
+  }, [products])
+
+  const filteredInventory = products.filter(item =>
+    (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (item.sku || item.code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    ((item.category && (item.category.name || item.category)) || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const formatCurrency = (value) => {
+    if (!value) return '৳0'
+    if (value >= 1_000_000) return `৳${(value / 1_000_000).toFixed(1)}M`
+    if (value >= 1_000) return `৳${(value / 1_000).toFixed(1)}k`
+    return `৳${Number(value).toFixed(2)}`
+  }
+
+  const movementData = useMemo(() => {
+    // Build simple daily incoming/outgoing from history
+    const map = {}
+    for (const h of history) {
+      const date = new Date(h.createdAt || h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      if (!map[date]) map[date] = { date, incoming: 0, outgoing: 0 }
+      if (h.type === 'in' || h.type === 'purchase') {
+        map[date].incoming += Math.abs(h.quantity || 0)
+      } else if (h.type === 'out' || h.type === 'sale') {
+        map[date].outgoing += Math.abs(h.quantity || 0)
+      } else if (h.type === 'transfer') {
+        // treat transfer as outgoing here
+        map[date].outgoing += Math.abs(h.quantity || 0)
+      }
+    }
+    return Object.values(map).slice(-15)
+  }, [history])
 
   const getStatusColor = (status) => {
     const colors = {
@@ -165,7 +161,7 @@ const Inventory = () => {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">৳2.45M</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalStockValue)}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingUp className="mr-1 h-3 w-3 text-green-600" />
               +8.5% from last month
@@ -178,7 +174,7 @@ const Inventory = () => {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">230</div>
+            <div className="text-2xl font-bold">{productsTotal}</div>
             <p className="flex items-center text-xs text-muted-foreground">
               <TrendingDown className="mr-1 h-3 w-3 text-red-600" />
               -3 items from last count
@@ -191,7 +187,7 @@ const Inventory = () => {
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">8</div>
+            <div className="text-2xl font-bold">{(alerts.lowStock || 0) + (alerts.outOfStock || 0)}</div>
             <p className="text-xs text-muted-foreground">
               Need immediate attention
             </p>
@@ -355,44 +351,51 @@ const Inventory = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredInventory.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">{item.productCode}</TableCell>
-                      <TableCell>{item.productName}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{item.category}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-sm">
-                            <span>Current: {item.currentStock} {item.unit}</span>
-                            <span className="text-muted-foreground">
-                              Min: {item.minStock}
-                            </span>
+                  {filteredInventory.map((item) => {
+                    const id = item._id || item.id
+                    const code = item.sku || item.code || '-'
+                    const name = item.name || item.productName || '-'
+                    const category = (item.category && (item.category.name || item.category)) || '-'
+                    const currentStock = item.inventory?.quantity ?? 0
+                    const minStock = item.inventory?.minStock ?? 0
+                    const maxStock = item.inventory?.maxStock ?? 1
+                    const unit = item.inventory?.unit || ''
+                    const stockValue = (currentStock * (item.price?.cost || 0)) || 0
+                    const status = currentStock === 0 ? 'out-of-stock' : (currentStock <= minStock ? 'low-stock' : 'in-stock')
+                    const lastUpdated = item.updatedAt || item.lastUpdated || item.createdAt || ''
+                    return (
+                      <TableRow key={id}>
+                        <TableCell className="font-medium">{code}</TableCell>
+                        <TableCell>{name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{category}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                              <span>Current: {currentStock} {unit}</span>
+                              <span className="text-muted-foreground">Min: {minStock}</span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
+                              <div
+                                className={`h-full rounded-full ${
+                                  status === 'in-stock' ? 'bg-green-600' : status === 'low-stock' ? 'bg-amber-600' : 'bg-red-600'
+                                }`}
+                                style={{ width: `${(currentStock / Math.max(maxStock, 1)) * 100}%` }}
+                              />
+                            </div>
                           </div>
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800">
-                            <div
-                              className={`h-full rounded-full ${
-                                item.status === 'in-stock'
-                                  ? 'bg-green-600'
-                                  : 'bg-amber-600'
-                              }`}
-                              style={{ width: `${(item.currentStock / item.maxStock) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium">{item.value}</TableCell>
-                      <TableCell>
-                        <Badge className={getStatusColor(item.status)}>
-                          {item.status.replace('-', ' ')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {item.lastUpdated}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell className="font-medium">{formatCurrency(stockValue)}</TableCell>
+                        <TableCell>
+                          <Badge className={getStatusColor(status)}>
+                            {status.replace('-', ' ')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{lastUpdated ? new Date(lastUpdated).toLocaleString() : '-'}</TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </CardContent>
@@ -421,64 +424,16 @@ const Inventory = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[
-                    {
-                      date: '2024-01-15 10:30',
-                      product: 'Wooden Dining Chair',
-                      type: 'Sale',
-                      quantity: -5,
-                      reference: 'ORD-00123',
-                      by: 'Sharmin Akter',
-                      remarks: 'Customer order',
-                    },
-                    {
-                      date: '2024-01-14 14:20',
-                      product: 'Steel Office Table',
-                      type: 'Purchase',
-                      quantity: +20,
-                      reference: 'PUR-00456',
-                      by: 'Abdul Karim',
-                      remarks: 'Supplier delivery',
-                    },
-                    {
-                      date: '2024-01-13 11:15',
-                      product: 'Leather Sofa Set',
-                      type: 'Sale',
-                      quantity: -2,
-                      reference: 'ORD-00122',
-                      by: 'Sharmin Akter',
-                      remarks: 'Corporate order',
-                    },
-                    {
-                      date: '2024-01-12 09:45',
-                      product: 'Wooden Bed Frame',
-                      type: 'Adjustment',
-                      quantity: -3,
-                      reference: 'ADJ-00789',
-                      by: 'System',
-                      remarks: 'Damaged stock write-off',
-                    },
-                    {
-                      date: '2024-01-11 16:30',
-                      product: 'Metal Wardrobe',
-                      type: 'Transfer',
-                      quantity: +10,
-                      reference: 'TRF-00321',
-                      by: 'Kamal Hossain',
-                      remarks: 'Warehouse transfer',
-                    },
-                  ].map((movement, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="text-sm">{movement.date}</TableCell>
-                      <TableCell className="font-medium">{movement.product}</TableCell>
+                  {history.map((movement) => (
+                    <TableRow key={movement._id || movement.id}>
+                      <TableCell className="text-sm">{new Date(movement.createdAt).toLocaleString()}</TableCell>
+                      <TableCell className="font-medium">{movement.product?.name || movement.product || '-'}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
-                            movement.type === 'Sale'
-                              ? 'destructive'
-                              : movement.type === 'Purchase'
-                              ? 'default'
-                              : 'outline'
+                            movement.type === 'out' || movement.type === 'sale' ? 'destructive'
+                            : movement.type === 'in' || movement.type === 'purchase' ? 'default'
+                            : 'outline'
                           }
                         >
                           {movement.type}
@@ -489,10 +444,10 @@ const Inventory = () => {
                           {movement.quantity > 0 ? '+' : ''}{movement.quantity}
                         </span>
                       </TableCell>
-                      <TableCell className="text-sm">{movement.reference}</TableCell>
-                      <TableCell className="text-sm">{movement.by}</TableCell>
+                      <TableCell className="text-sm">{movement.reference || movement._id}</TableCell>
+                      <TableCell className="text-sm">{movement.performedBy?.name || '-'}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {movement.remarks}
+                        {movement.reason || movement.remarks || '-'}
                       </TableCell>
                     </TableRow>
                   ))}

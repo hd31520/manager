@@ -1,4 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import pkg from '../../../package.json'
+import api from '../../utils/api'
+import { useAuth } from '../../contexts/AuthContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -23,32 +27,82 @@ import {
 
 const Settings = () => {
   const [activeTab, setActiveTab] = useState('company')
-  const [companySettings, setCompanySettings] = useState({
-    name: 'Karim Furniture Factory',
-    type: 'Wood Factory',
-    email: 'info@karimfurniture.com',
-    phone: '+8801712345678',
-    address: '123 Factory Road, Dhaka 1212, Bangladesh',
-    website: 'https://karimfurniture.com',
-    currency: 'BDT',
-    language: 'English',
-    timezone: 'Asia/Dhaka',
-    dateFormat: 'DD/MM/YYYY',
-  })
+  const { currentCompany } = useAuth()
 
-  const [subscription, setSubscription] = useState({
-    plan: 'Premium',
-    workers: '25/50',
-    renewal: '15 February 2024',
-    price: '৳500/month',
-    status: 'active',
-    paymentMethod: 'Credit Card',
-    autoRenew: true,
-  })
+  const { data: companyResp } = useQuery(
+    { queryKey: ['company', currentCompany?.id],
+      queryFn: () => api.get(`/companies/${currentCompany?.id}`).then(res => res.data),
+      enabled: !!currentCompany }
+  )
+
+  const [companySettings, setCompanySettings] = useState({})
+
+  useEffect(() => {
+    if (companyResp?.company) {
+      setCompanySettings(companyResp.company)
+    }
+  }, [companyResp])
+
+  const { data: subscriptionResp, isLoading: subscriptionLoading, error: subscriptionError } = useQuery(
+    { queryKey: ['subscription', currentCompany?.id],
+      queryFn: () => api.get(`/subscriptions/${currentCompany?.id}`).then(res => res.data),
+      enabled: !!currentCompany }
+  )
+
+  const subscription = subscriptionResp?.subscription || null
+
+  const { data: workersResp } = useQuery(
+    { queryKey: ['workers', currentCompany?.id],
+      queryFn: () => api.get('/workers', { params: { companyId: currentCompany?.id } }).then(res => res.data),
+      enabled: !!currentCompany }
+  )
+
+  const companyUsers = workersResp?.workers || []
+
+  // Company-level stats (workers, products, today's sales)
+  const { data: statsResp, isLoading: statsLoading } = useQuery(
+    { queryKey: ['companyStats', currentCompany?.id],
+      queryFn: () => api.get(`/companies/${currentCompany?.id}/stats`).then(r => r.data),
+      enabled: !!currentCompany }
+  )
+
+  const companyStats = statsResp?.stats || {}
+
+  const { data: usersCountResp, isLoading: usersCountLoading } = useQuery(
+    { queryKey: ['companyUsersCount', currentCompany?.id],
+      queryFn: () => api.get(`/companies/${currentCompany?.id}/users-count`).then(r => r.data),
+      enabled: !!currentCompany }
+  )
+
+  const activeUsersCount = usersCountResp?.count ?? companyUsers.length
+
+  const defaultBusinessHours = [
+    { day: 'Monday', open: '09:00', close: '18:00', closed: false },
+    { day: 'Tuesday', open: '09:00', close: '18:00', closed: false },
+    { day: 'Wednesday', open: '09:00', close: '18:00', closed: false },
+    { day: 'Thursday', open: '09:00', close: '18:00', closed: false },
+    { day: 'Friday', open: '09:00', close: '17:00', closed: false },
+    { day: 'Saturday', open: '10:00', close: '16:00', closed: false },
+    { day: 'Sunday', open: '', close: '', closed: true },
+  ]
+
+  const businessHours = companySettings.businessHours || defaultBusinessHours
 
   const handleSaveSettings = () => {
-    // In a real app, this would make an API call
-    console.log('Saving settings:', companySettings)
+    // Save settings to backend
+    if (!currentCompany?.id) return
+    ;(async () => {
+      try {
+        const res = await api.put(`/companies/${currentCompany.id}`, companySettings)
+        const updated = res.data?.company || res.data
+        if (updated) setCompanySettings(updated)
+        // minimal feedback
+        window.alert('Settings saved successfully')
+      } catch (err) {
+        console.error('Failed to save settings', err)
+        window.alert('Failed to save settings')
+      }
+    })()
   }
 
   return (
@@ -89,7 +143,7 @@ const Settings = () => {
                   <Label htmlFor="company-name">Company Name</Label>
                   <Input
                     id="company-name"
-                    value={companySettings.name}
+                    value={companySettings.name || ''}
                     onChange={(e) => setCompanySettings({...companySettings, name: e.target.value})}
                   />
                 </div>
@@ -98,7 +152,7 @@ const Settings = () => {
                   <Label htmlFor="company-type">Business Type</Label>
                   <Input
                     id="company-type"
-                    value={companySettings.type}
+                    value={companySettings.type || ''}
                     onChange={(e) => setCompanySettings({...companySettings, type: e.target.value})}
                   />
                 </div>
@@ -109,7 +163,7 @@ const Settings = () => {
                     <Input
                       id="company-email"
                       type="email"
-                      value={companySettings.email}
+                      value={companySettings.email || ''}
                       onChange={(e) => setCompanySettings({...companySettings, email: e.target.value})}
                     />
                   </div>
@@ -117,7 +171,7 @@ const Settings = () => {
                     <Label htmlFor="company-phone">Phone</Label>
                     <Input
                       id="company-phone"
-                      value={companySettings.phone}
+                      value={companySettings.phone || ''}
                       onChange={(e) => setCompanySettings({...companySettings, phone: e.target.value})}
                     />
                   </div>
@@ -127,7 +181,7 @@ const Settings = () => {
                   <Label htmlFor="company-website">Website</Label>
                   <Input
                     id="company-website"
-                    value={companySettings.website}
+                    value={companySettings.website || ''}
                     onChange={(e) => setCompanySettings({...companySettings, website: e.target.value})}
                   />
                 </div>
@@ -136,7 +190,7 @@ const Settings = () => {
                   <Label htmlFor="company-address">Address</Label>
                   <Textarea
                     id="company-address"
-                    value={companySettings.address}
+                    value={companySettings.address || ''}
                     onChange={(e) => setCompanySettings({...companySettings, address: e.target.value})}
                     rows={3}
                   />
@@ -157,7 +211,7 @@ const Settings = () => {
                   <select
                     id="currency"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    value={companySettings.currency}
+                    value={companySettings.currency || ''}
                     onChange={(e) => setCompanySettings({...companySettings, currency: e.target.value})}
                   >
                     <option value="BDT">Bangladeshi Taka (BDT)</option>
@@ -172,7 +226,7 @@ const Settings = () => {
                   <select
                     id="language"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    value={companySettings.language}
+                    value={companySettings.language || ''}
                     onChange={(e) => setCompanySettings({...companySettings, language: e.target.value})}
                   >
                     <option value="English">English</option>
@@ -185,7 +239,7 @@ const Settings = () => {
                   <select
                     id="timezone"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    value={companySettings.timezone}
+                    value={companySettings.timezone || ''}
                     onChange={(e) => setCompanySettings({...companySettings, timezone: e.target.value})}
                   >
                     <option value="Asia/Dhaka">Asia/Dhaka (GMT+6)</option>
@@ -200,7 +254,7 @@ const Settings = () => {
                   <select
                     id="date-format"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    value={companySettings.dateFormat}
+                    value={companySettings.dateFormat || ''}
                     onChange={(e) => setCompanySettings({...companySettings, dateFormat: e.target.value})}
                   >
                     <option value="DD/MM/YYYY">DD/MM/YYYY</option>
@@ -221,24 +275,16 @@ const Settings = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {[
-                  { day: 'Monday', open: '09:00', close: '18:00', closed: false },
-                  { day: 'Tuesday', open: '09:00', close: '18:00', closed: false },
-                  { day: 'Wednesday', open: '09:00', close: '18:00', closed: false },
-                  { day: 'Thursday', open: '09:00', close: '18:00', closed: false },
-                  { day: 'Friday', open: '09:00', close: '17:00', closed: false },
-                  { day: 'Saturday', open: '10:00', close: '16:00', closed: false },
-                  { day: 'Sunday', open: '', close: '', closed: true },
-                ].map((schedule) => (
+                {businessHours.map((schedule) => (
                   <div key={schedule.day} className="flex items-center justify-between">
                     <div className="font-medium">{schedule.day}</div>
                     {schedule.closed ? (
                       <Badge variant="destructive">Closed</Badge>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <Input className="w-24" defaultValue={schedule.open} />
+                        <Input className="w-24" defaultValue={schedule.open || ''} />
                         <span>to</span>
-                        <Input className="w-24" defaultValue={schedule.close} />
+                        <Input className="w-24" defaultValue={schedule.close || ''} />
                       </div>
                     )}
                   </div>
@@ -259,44 +305,58 @@ const Settings = () => {
             <CardContent>
               <div className="space-y-6">
                 <div className="rounded-lg border p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-2xl font-bold">{subscription.plan} Plan</h3>
-                      <p className="text-muted-foreground">{subscription.price}</p>
-                      <div className="mt-4 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Users className="h-4 w-4 text-muted-foreground" />
-                          <span>Workers: {subscription.workers}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CreditCard className="h-4 w-4 text-muted-foreground" />
-                          <span>Payment Method: {subscription.paymentMethod}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-muted-foreground" />
-                          <span>Renewal Date: {subscription.renewal}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={subscription.status === 'active' ? 'default' : 'destructive'}>
-                            {subscription.status}
-                          </Badge>
-                          <span className="text-sm text-muted-foreground">
-                            Auto-renew: {subscription.autoRenew ? 'On' : 'Off'}
-                          </span>
+                  {subscriptionLoading ? (
+                    <div>Loading subscription...</div>
+                  ) : subscription ? (
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-2xl font-bold">{subscription.plan} Plan</h3>
+                        <p className="text-muted-foreground">{subscription.price}</p>
+                        <div className="mt-4 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-muted-foreground" />
+                            <span>Workers: {subscription.workers}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CreditCard className="h-4 w-4 text-muted-foreground" />
+                            <span>Payment Method: {subscription.paymentMethod}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                            <span>Renewal Date: {subscription.renewal}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={subscription.status === 'active' ? 'default' : 'destructive'}>
+                              {subscription.status}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">
+                              Auto-renew: {subscription.autoRenew ? 'On' : 'Off'}
+                            </span>
+                          </div>
                         </div>
                       </div>
+                      <Button variant="outline">
+                        <CreditCard className="mr-2 h-4 w-4" />
+                        Update Payment
+                      </Button>
                     </div>
-                    <Button variant="outline">
-                      <CreditCard className="mr-2 h-4 w-4" />
-                      Update Payment
-                    </Button>
-                  </div>
+                  ) : (
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="text-2xl font-bold">No Active Subscription</h3>
+                        <p className="text-muted-foreground">You are currently on the free plan.</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button>Choose Plan</Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
                   <h4 className="mb-4 font-semibold">Plan Features</h4>
                   <div className="grid gap-3 md:grid-cols-2">
-                    {[
+                    {(subscription?.features || [
                       'Up to 50 workers',
                       'Advanced analytics',
                       'Custom reports',
@@ -305,7 +365,7 @@ const Settings = () => {
                       '24/7 priority support',
                       'Data backup & recovery',
                       'Unlimited products',
-                    ].map((feature, index) => (
+                    ]).map((feature, index) => (
                       <div key={index} className="flex items-center gap-2">
                         <div className="flex h-5 w-5 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
                           <CheckCircle className="h-3 w-3 text-green-600 dark:text-green-400" />
@@ -318,32 +378,30 @@ const Settings = () => {
 
                 <div>
                   <h4 className="mb-4 font-semibold">Upgrade Plan</h4>
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="rounded-lg border p-4">
-                      <h5 className="font-medium">Basic</h5>
-                      <p className="text-2xl font-bold">৳200<span className="text-sm font-normal text-muted-foreground">/month</span></p>
-                      <p className="text-sm text-muted-foreground">1-10 Workers</p>
-                      <Button size="sm" className="mt-3 w-full" variant="outline">
-                        Downgrade
-                      </Button>
-                    </div>
-                    <div className="rounded-lg border-2 border-primary p-4">
-                      <h5 className="font-medium">Standard</h5>
-                      <p className="text-2xl font-bold">৳300<span className="text-sm font-normal text-muted-foreground">/month</span></p>
-                      <p className="text-sm text-muted-foreground">11-20 Workers</p>
-                      <Button size="sm" className="mt-3 w-full" variant="outline">
-                        Current
-                      </Button>
-                    </div>
-                    <div className="rounded-lg border p-4">
-                      <h5 className="font-medium">Premium</h5>
-                      <p className="text-2xl font-bold">৳500<span className="text-sm font-normal text-muted-foreground">/month</span></p>
-                      <p className="text-sm text-muted-foreground">21-50 Workers</p>
-                      <Button size="sm" className="mt-3 w-full">
-                        Upgrade
-                      </Button>
-                    </div>
-                  </div>
+                  {(() => {
+                    const plans = [
+                      { key: 'Basic', price: '৳200', range: '1-10 Workers' },
+                      { key: 'Standard', price: '৳300', range: '11-20 Workers' },
+                      { key: 'Premium', price: '৳500', range: '21-50 Workers' },
+                    ]
+                    return (
+                      <div className="grid gap-4 md:grid-cols-3">
+                        {plans.map((p) => {
+                          const isCurrent = subscription?.plan === p.key
+                          return (
+                            <div key={p.key} className={`rounded-lg border p-4 ${isCurrent ? 'border-2 border-primary' : ''}`}>
+                              <h5 className="font-medium">{p.key}</h5>
+                              <p className="text-2xl font-bold">{p.price}<span className="text-sm font-normal text-muted-foreground">/month</span></p>
+                              <p className="text-sm text-muted-foreground">{p.range}</p>
+                              <Button size="sm" className="mt-3 w-full" variant={isCurrent ? 'outline' : 'default'}>
+                                {isCurrent ? 'Current' : (subscription ? 'Upgrade' : 'Choose')}
+                              </Button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-800">
@@ -351,7 +409,7 @@ const Settings = () => {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>Next billing date</span>
-                      <span className="font-medium">{subscription.renewal}</span>
+                      <span className="font-medium">{subscriptionLoading ? 'Loading...' : (subscription?.renewal ?? 'N/A')}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Billing cycle</span>
@@ -397,29 +455,35 @@ const Settings = () => {
                     <div className="font-medium">Actions</div>
                   </div>
                   
-                  {[
-                    { name: 'Abdul Karim', email: 'owner@example.com', role: 'Owner', status: 'active' },
-                    { name: 'Fatima Begum', email: 'manager@example.com', role: 'Manager', status: 'active' },
-                    { name: 'Sharmin Akter', email: 'sales@example.com', role: 'Sales', status: 'active' },
-                    { name: 'Raju Ahmed', email: 'worker@example.com', role: 'Worker', status: 'inactive' },
-                  ].map((user, index) => (
-                    <div key={index} className="grid grid-cols-5 gap-4 p-4 border-b last:border-b-0">
-                      <div className="font-medium">{user.name}</div>
-                      <div className="text-sm text-muted-foreground">{user.email}</div>
-                      <div>
-                        <Badge variant="outline">{user.role}</Badge>
-                      </div>
-                      <div>
-                        <Badge variant={user.status === 'active' ? 'default' : 'secondary'}>
-                          {user.status}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button size="sm" variant="outline">Edit</Button>
-                        <Button size="sm" variant="destructive">Remove</Button>
-                      </div>
-                    </div>
-                  ))}
+                  {companyUsers && companyUsers.length > 0 ? (
+                    companyUsers.map((user) => {
+                      const id = user._id || user.id
+                      const name = user.user?.name || user.name || 'User'
+                      const email = user.user?.email || user.email || '-'
+                      const role = user.role || user.designation || (user.user?.role) || 'Worker'
+                      const status = (user.active === false || user.status === 'inactive') ? 'inactive' : 'active'
+                      return (
+                        <div key={id} className="grid grid-cols-5 gap-4 p-4 border-b last:border-b-0">
+                          <div className="font-medium">{name}</div>
+                          <div className="text-sm text-muted-foreground">{email}</div>
+                          <div>
+                            <Badge variant="outline">{role}</Badge>
+                          </div>
+                          <div>
+                            <Badge variant={status === 'active' ? 'default' : 'secondary'}>
+                              {status}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" variant="outline">Edit</Button>
+                            <Button size="sm" variant="destructive">Remove</Button>
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="p-6 text-center text-sm text-muted-foreground">No users found for this company.</div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -551,23 +615,35 @@ const Settings = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Platform Version</span>
-                    <span className="font-medium">v1.0.0</span>
+                    <span className="font-medium">{pkg?.version ? `v${pkg.version}` : 'N/A'}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Last Updated</span>
-                    <span className="font-medium">2024-01-15</span>
+                    <span className="font-medium">{companySettings?.updatedAt ? new Date(companySettings.updatedAt).toLocaleDateString() : (companyResp?.company?.updatedAt ? new Date(companyResp.company.updatedAt).toLocaleDateString() : 'N/A')}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Database Size</span>
-                    <span className="font-medium">245.6 MB</span>
+                    <span className="font-medium">{/* not available from API */}N/A</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Active Users</span>
-                    <span className="font-medium">25</span>
+                    <span className="font-medium">{usersCountLoading ? 'Loading...' : (activeUsersCount ?? 'N/A')}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Uptime</span>
-                    <span className="font-medium">99.8%</span>
+                    <span className="font-medium">{/* not available from API */}N/A</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Workers</span>
+                    <span className="font-medium">{statsLoading ? 'Loading...' : (companyStats?.workers ?? 'N/A')}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Products</span>
+                    <span className="font-medium">{statsLoading ? 'Loading...' : (companyStats?.products ?? 'N/A')}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Today's Sales</span>
+                    <span className="font-medium">{statsLoading ? 'Loading...' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(companyStats?.todaySales || 0)}</span>
                   </div>
                 </div>
 

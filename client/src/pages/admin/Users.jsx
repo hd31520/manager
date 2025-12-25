@@ -241,13 +241,13 @@ const AdminUsers = () => {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <Avatar>
-                        <AvatarImage src={user.avatar} />
+                        <AvatarImage src={user.avatar} alt={user.name || 'User'} />
                         <AvatarFallback>
-                          {user.name.split(' ').map(n => n[0]).join('')}
+                          {(user.name || '').split(' ').map(n => n[0]).join('') || 'U'}
                         </AvatarFallback>
                       </Avatar>
                       <div>
-                        <div className="font-medium">{user.name}</div>
+                        <div className="font-medium">{user.name || 'Unnamed User'}</div>
                         <div className="text-sm text-muted-foreground">
                           ID: USER-{user.id.toString().padStart(3, '0')}
                         </div>
